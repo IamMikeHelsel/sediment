@@ -1,0 +1,10 @@
+/Users/mike/Dev/sediment/dist/.package.bsvsNf/sediment.app/Contents/Info.plist: OK
+/Users/mike/Dev/sediment/dist/.package.bsvsNf/sediment.app: replacing existing signature
+/Users/mike/Dev/sediment/dist/.package.bsvsNf/sediment.app: valid on disk
+/Users/mike/Dev/sediment/dist/.package.bsvsNf/sediment.app: satisfies its Designated Requirement
+Created dist/sediment-0.1.3-macos-arm64.zip
+Developer ID signed; notarization and Gatekeeper validation are still required.
+/Users/mike/Dev/sediment/dist/.cli.2jHwra/sediment: replacing existing signature
+/Users/mike/Dev/sediment/dist/.cli.2jHwra/sediment: valid on disk
+/Users/mike/Dev/sediment/dist/.cli.2jHwra/sediment: satisfies its Designated Requirement
+Created dist/sediment-0.1.3-cli-darwin-arm64.tar.gz

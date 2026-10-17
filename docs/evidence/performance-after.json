@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "python": "3.14.0",
+  "binary_sha256": "73ededcdf8fb58f6d8610fbf975892a5751b27b97364c7c1296a456322cab8eb",
+  "binary_version": "sediment 0.1.2",
+  "repeats": 3,
+  "workload": {
+    "small_files": 1000,
+    "mixed_bytes": 16777216,
+    "seed": 20261017,
+    "files": 1001,
+    "manifest_sha256": "f6f0dc9cb08a72664072458a65e7472cd3912f4126d41266f38d14b16494f874"
+  },
+  "results": {
+    "zip_list": {
+      "seconds": [
+        0.2879392910399474,
+        0.013652833993546665,
+        0.013645333994645625
+      ],
+      "median_seconds": 0.013652833993546665,
+      "correctness": "passed"
+    },
+    "zip_test": {
+      "seconds": [
+        0.02518979099113494,
+        0.028810332994908094,
+        0.027208125044126064
+      ],
+      "median_seconds": 0.027208125044126064,
+      "correctness": "passed"
+    },
+    "zip_extract": {
+      "seconds": [
+        0.17022675002226606,
+        0.1355169169837609,
+        0.17656091699609533
+      ],
+      "median_seconds": 0.17022675002226606,
+      "correctness": "passed"
+    },
+    "tar_gz_list": {
+      "seconds": [
+        0.012135041004512459,
+        0.012451749993488193,
+        0.012362832960207015
+      ],
+      "median_seconds": 0.012362832960207015,
+      "correctness": "passed"
+    },
+    "tar_gz_test": {
+      "seconds": [
+        0.01717829203698784,
+        0.01808620902011171,
+        0.01901049999287352
+      ],
+      "median_seconds": 0.01808620902011171,
+      "correctness": "passed"
+    },
+    "tar_gz_extract": {
+      "seconds": [
+        0.11271399998804554,
+        0.11276649998035282,
+        0.12079670804087073
+      ],
+      "median_seconds": 0.11276649998035282,
+      "correctness": "passed"
+    },
+    "zip_create": {
+      "seconds": [
+        0.16739070799667388,
+        0.17328316695056856,
+        0.17018620896851644
+      ],
+      "median_seconds": 0.17018620896851644,
+      "correctness": "passed"
+    }
+  },
+  "limitations": "Generated fixture data is warm; executable cache may be cold on first sample. Sequential runs, process startup included. No hardware-independent timing gate. Archive byte hashes are not compared because metadata varies; extracted payload SHA-256 hashes are compared.",
+  "comparison": {
+    "zip_list": {
+      "baseline_median_seconds": 0.030947832972742617,
+      "ratio_after_over_before": 0.44115638098381343
+    },
+    "zip_test": {
+      "baseline_median_seconds": 0.03853958402760327,
+      "ratio_after_over_before": 0.7059786899785618
+    },
+    "zip_extract": {
+      "baseline_median_seconds": 0.29087279102532193,
+      "ratio_after_over_before": 0.5852274783840025
+    },
+    "tar_gz_list": {
+      "baseline_median_seconds": 0.01276229100767523,
+      "ratio_after_over_before": 0.9687001301546891
+    },
+    "tar_gz_test": {
+      "baseline_median_seconds": 0.018959708977490664,
+      "ratio_after_over_before": 0.9539286199795582
+    },
+    "tar_gz_extract": {
+      "baseline_median_seconds": 0.11401529202703387,
+      "ratio_after_over_before": 0.9890471530223774
+    },
+    "zip_create": {
+      "baseline_median_seconds": 0.18349279096582904,
+      "ratio_after_over_before": 0.9274817177978909
+    }
+  }
+}

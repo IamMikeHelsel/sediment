@@ -1,0 +1,104 @@
+{
+  "binary_sha256": "39fea7c3b4748ab51bf4e9a2fb687f3815fc29c62ee7b326421a5eb707bf60b4",
+  "signal": "SIGINT after Compressing phase",
+  "exit_code": 130,
+  "published_output": false,
+  "staging_leftovers": false,
+  "events": [
+    {
+      "timestamp": "2026-10-17T18:45:30.558455Z",
+      "level": "INFO",
+      "fields": {
+        "event": "started"
+      },
+      "target": "sediment",
+      "span": {
+        "operation": "create",
+        "name": "archive_operation"
+      },
+      "spans": [
+        {
+          "operation": "create",
+          "name": "archive_operation"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-10-17T18:45:30.558522Z",
+      "level": "DEBUG",
+      "fields": {
+        "message": "archive phase",
+        "phase": "Collecting"
+      },
+      "target": "sediment::archive",
+      "span": {
+        "operation": "create",
+        "name": "archive_operation"
+      },
+      "spans": [
+        {
+          "operation": "create",
+          "name": "archive_operation"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-10-17T18:45:30.558737Z",
+      "level": "DEBUG",
+      "fields": {
+        "message": "archive phase",
+        "phase": "Compressing"
+      },
+      "target": "sediment::archive",
+      "span": {
+        "operation": "create",
+        "name": "archive_operation"
+      },
+      "spans": [
+        {
+          "operation": "create",
+          "name": "archive_operation"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-10-17T18:45:30.559173Z",
+      "level": "INFO",
+      "fields": {
+        "event": "finished",
+        "outcome": "cancelled",
+        "elapsed_ms": 0
+      },
+      "target": "sediment",
+      "span": {
+        "operation": "create",
+        "name": "archive_operation"
+      },
+      "spans": [
+        {
+          "operation": "create",
+          "name": "archive_operation"
+        }
+      ]
+    },
+    {
+      "cancelled": true,
+      "error": "Operation cancelled"
+    },
+    {
+      "timestamp": "2026-10-17T18:45:30.559189Z",
+      "level": "INFO",
+      "fields": {
+        "message": "close",
+        "time.busy": "734\u00b5s",
+        "time.idle": "751ns"
+      },
+      "target": "sediment",
+      "span": {
+        "operation": "create",
+        "name": "archive_operation"
+      },
+      "spans": []
+    }
+  ]
+}

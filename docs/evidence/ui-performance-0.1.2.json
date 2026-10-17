@@ -1,0 +1,21 @@
+{
+  "cache_rebuilds_after_idle": 1,
+  "entries": 100000,
+  "filtered_gpu_render_with_renderer_initialization_ms": 232.344166,
+  "filtered_matches": 1,
+  "filtered_query_and_layout_ms": 0.574458,
+  "host_arch": "aarch64",
+  "host_os": "macos",
+  "idle_frame_median_ms": 0.037875,
+  "idle_frame_samples": 30,
+  "initial_cache_and_layout_ms": 2.7565,
+  "notes": "Synthetic test fixture only. Host-specific observations, no timing acceptance threshold. Run in release mode. Layout uses the real application and virtualized table; GPU measurement includes first-render initialization.",
+  "offscreen_row_absent_before_filter": true,
+  "profile": "release",
+  "schema": 1,
+  "version": "0.1.2",
+  "viewport": [
+    560,
+    380
+  ]
+}

@@ -1,0 +1,12 @@
+[
+  {
+    "command": "./scripts/package-macos.sh",
+    "exit_code": 0,
+    "output": "/Users/mike/Dev/sediment/dist/.package.1foNxg/sediment.app/Contents/Info.plist: OK\n/Users/mike/Dev/sediment/dist/.package.1foNxg/sediment.app: replacing existing signature\n/Users/mike/Dev/sediment/dist/.package.1foNxg/sediment.app: valid on disk\n/Users/mike/Dev/sediment/dist/.package.1foNxg/sediment.app: satisfies its Designated Requirement\nCreated dist/sediment-0.1.2-macos-arm64.zip\nDeveloper ID signed; notarization and Gatekeeper validation are still required.\n"
+  },
+  {
+    "command": "./scripts/package-cli.sh",
+    "exit_code": 0,
+    "output": "/Users/mike/Dev/sediment/dist/.cli.SveagT/sediment: replacing existing signature\n/Users/mike/Dev/sediment/dist/.cli.SveagT/sediment: valid on disk\n/Users/mike/Dev/sediment/dist/.cli.SveagT/sediment: satisfies its Designated Requirement\nCreated dist/sediment-0.1.2-cli-darwin-arm64.tar.gz\n"
+  }
+]

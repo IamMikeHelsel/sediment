@@ -1,0 +1,214 @@
+All checks passed!
+4 files already formatted
+    Checking tracing-subscriber v0.3.23
+    Checking sediment v0.1.2 (/Users/mike/Dev/sediment)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.79s
+   Compiling sediment v0.1.2 (/Users/mike/Dev/sediment)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.70s
+     Running unittests src/lib.rs (target/debug/deps/sediment-95553d5bed7539ca)
+
+running 26 tests
+test archive::tests::rejects_ambiguous_paths ... ok
+test archive::tests::path_depth_boundary ... ok
+test archive::tests::corrupt_zip_rolls_back ... ok
+test archive::tests::safety_limit_boundaries ... ok
+test archive::tests::precancelled_operations_do_not_touch_filesystem ... ok
+test archive::tests::refuses_output_replacement ... ok
+test archive::tests::rejects_tar_duplicate_paths ... ok
+test archive::tests::rejects_nonzero_tar_trailer_and_extra_gzip_member ... ok
+test archive::tests::executable_permissions_survive_but_special_bits_do_not ... ok
+test archive::tests::legitimate_gnu_long_names_and_pax_size_overrides_work ... ok
+test archive::tests::zip_metadata_preflight_rejects_oversized_directory_and_zip64_count ... ok
+test archive::tests::zip_parser_metadata_budget_stops_reads ... ok
+test archive::tests::oversized_tar_extensions_are_rejected_before_payload_allocation ... ok
+test archive::tests::archive_symlinks_and_fifos_are_rejected_without_opening ... ok
+test archive::tests::cancellation_during_compression_removes_temporary_output ... ok
+test archive::tests::rejects_tar_symlinks ... ok
+test archive::tests::rejects_traversal_without_publishing ... ok
+test archive::tests::source_replaced_by_symlink_or_different_inode_is_rejected ... ok
+test archive::tests::completed_progress_matches_payload_and_late_cancel_does_not_reverse_commit ... ok
+test archive::tests::tar_gzip_footer_is_verified_and_root_directory_allowed ... ok
+test archive::tests::tar_round_trip ... ok
+test archive::tests::zip_round_trip_and_no_overwrite ... ok
+test archive::tests::unicode_and_empty_directories_survive ... ok
+test archive::tests::cancellation_during_extraction_rolls_back_staging ... ok
+test archive::tests::cancellation_during_verification_is_typed ... ok
+test archive::tests::cancellation_interrupts_tar_scan_skipping_payload ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.45s
+
+     Running unittests src/main.rs (target/debug/deps/sediment-f72ef81de8990c89)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (target/debug/deps/cli-650075deaa62d474)
+
+running 6 tests
+test trace_is_json_and_does_not_disclose_archive_names ... ok
+test usage_and_version_have_predictable_exit_codes ... ok
+test human_listing_escapes_terminal_control_characters ... ok
+test traversal_and_unsupported_inputs_fail_cleanly ... ok
+test corruption_returns_failure_and_publishes_nothing ... ok
+test cli_round_trip_and_json_contract ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.19s
+
+   Doc-tests sediment
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.61s
+   Compiling sediment v0.1.2 (/Users/mike/Dev/sediment)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.42s
+     Running unittests src/lib.rs (target/debug/deps/sediment-40e0c7e9f6eda48c)
+
+running 26 tests
+test archive::tests::rejects_ambiguous_paths ... ok
+test archive::tests::path_depth_boundary ... ok
+test archive::tests::archive_symlinks_and_fifos_are_rejected_without_opening ... ok
+test archive::tests::precancelled_operations_do_not_touch_filesystem ... ok
+test archive::tests::safety_limit_boundaries ... ok
+test archive::tests::rejects_tar_duplicate_paths ... ok
+test archive::tests::rejects_traversal_without_publishing ... ok
+test archive::tests::refuses_output_replacement ... ok
+test archive::tests::rejects_tar_symlinks ... ok
+test archive::tests::oversized_tar_extensions_are_rejected_before_payload_allocation ... ok
+test archive::tests::zip_metadata_preflight_rejects_oversized_directory_and_zip64_count ... ok
+test archive::tests::zip_parser_metadata_budget_stops_reads ... ok
+test archive::tests::rejects_nonzero_tar_trailer_and_extra_gzip_member ... ok
+test archive::tests::completed_progress_matches_payload_and_late_cancel_does_not_reverse_commit ... ok
+test archive::tests::executable_permissions_survive_but_special_bits_do_not ... ok
+test archive::tests::cancellation_during_compression_removes_temporary_output ... ok
+test archive::tests::corrupt_zip_rolls_back ... ok
+test archive::tests::tar_gzip_footer_is_verified_and_root_directory_allowed ... ok
+test archive::tests::source_replaced_by_symlink_or_different_inode_is_rejected ... ok
+test archive::tests::tar_round_trip ... ok
+test archive::tests::zip_round_trip_and_no_overwrite ... ok
+test archive::tests::unicode_and_empty_directories_survive ... ok
+test archive::tests::legitimate_gnu_long_names_and_pax_size_overrides_work ... ok
+test archive::tests::cancellation_during_verification_is_typed ... ok
+test archive::tests::cancellation_during_extraction_rolls_back_staging ... ok
+test archive::tests::cancellation_interrupts_tar_scan_skipping_payload ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.42s
+
+     Running unittests src/main.rs (target/debug/deps/sediment-b82f24d33b5821c9)
+
+running 9 tests
+test gui::visual_tests::benchmark_large_archive ... ignored, Host-specific release-mode responsiveness measurement; no timing threshold
+test gui::visual_tests::render_cassette_previews ... ignored, Produces GPU-rendered review evidence; run explicitly on a graphics-capable host
+test gui::visual_tests::cancelling_waits_for_worker_cleanup ... ok
+test gui::visual_tests::close_request_cancels_and_waits_for_worker ... ok
+test gui::visual_tests::saved_archive_preview_failure_is_not_reported_as_failed_creation ... ok
+test gui::visual_tests::unsupported_archive_drop_opens_instead_of_compressing ... ok
+test gui::visual_tests::cache_rebuilds_only_for_archive_or_changed_query ... ok
+test gui::visual_tests::panicking_worker_reports_recoverable_error ... ok
+test gui::visual_tests::long_error_details_and_theme_are_accessible ... ok
+
+test result: ok. 7 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests/cli.rs (target/debug/deps/cli-d2a190d32e6594f5)
+
+running 6 tests
+test trace_is_json_and_does_not_disclose_archive_names ... ok
+test human_listing_escapes_terminal_control_characters ... ok
+test traversal_and_unsupported_inputs_fail_cleanly ... ok
+test corruption_returns_failure_and_publishes_nothing ... ok
+test usage_and_version_have_predictable_exit_codes ... ok
+test cli_round_trip_and_json_contract ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.42s
+
+   Doc-tests sediment
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking ctrlc v3.5.2
+    Checking zip v9.0.4
+    Checking sediment v0.1.2 (/Users/mike/Dev/sediment)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.28s
+   Compiling sediment v0.1.2 (/Users/mike/Dev/sediment)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.15s
+     Running unittests src/lib.rs (target/debug/deps/sediment-91c7138c6a2417a7)
+
+running 26 tests
+test archive::tests::rejects_ambiguous_paths ... ok
+test archive::tests::path_depth_boundary ... ok
+test archive::tests::corrupt_zip_rolls_back ... ok
+test archive::tests::refuses_output_replacement ... ok
+test archive::tests::archive_symlinks_and_fifos_are_rejected_without_opening ... ok
+test archive::tests::precancelled_operations_do_not_touch_filesystem ... ok
+test archive::tests::safety_limit_boundaries ... ok
+test archive::tests::rejects_nonzero_tar_trailer_and_extra_gzip_member ... ok
+test archive::tests::rejects_tar_duplicate_paths ... ok
+test archive::tests::rejects_traversal_without_publishing ... ok
+test archive::tests::zip_parser_metadata_budget_stops_reads ... ok
+test archive::tests::rejects_tar_symlinks ... ok
+test archive::tests::zip_metadata_preflight_rejects_oversized_directory_and_zip64_count ... ok
+test archive::tests::oversized_tar_extensions_are_rejected_before_payload_allocation ... ok
+test archive::tests::source_replaced_by_symlink_or_different_inode_is_rejected ... ok
+test archive::tests::executable_permissions_survive_but_special_bits_do_not ... ok
+test archive::tests::tar_gzip_footer_is_verified_and_root_directory_allowed ... ok
+test archive::tests::completed_progress_matches_payload_and_late_cancel_does_not_reverse_commit ... ok
+test archive::tests::cancellation_during_compression_removes_temporary_output ... ok
+test archive::tests::tar_round_trip ... ok
+test archive::tests::zip_round_trip_and_no_overwrite ... ok
+test archive::tests::unicode_and_empty_directories_survive ... ok
+test archive::tests::legitimate_gnu_long_names_and_pax_size_overrides_work ... ok
+test archive::tests::cancellation_during_verification_is_typed ... ok
+test archive::tests::cancellation_during_extraction_rolls_back_staging ... ok
+test archive::tests::cancellation_interrupts_tar_scan_skipping_payload ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+
+     Running unittests src/main.rs (target/debug/deps/sediment-7197316267346bce)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (target/debug/deps/cli-43d7a13ac6a22a4f)
+
+running 7 tests
+test cli_only_no_arguments_explains_gui_requirement ... ok
+test traversal_and_unsupported_inputs_fail_cleanly ... ok
+test trace_is_json_and_does_not_disclose_archive_names ... ok
+test human_listing_escapes_terminal_control_characters ... ok
+test corruption_returns_failure_and_publishes_nothing ... ok
+test usage_and_version_have_predictable_exit_codes ... ok
+test cli_round_trip_and_json_contract ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+   Doc-tests sediment
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running unittests src/lib.rs (target/debug/deps/sediment-40e0c7e9f6eda48c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 26 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/sediment-b82f24d33b5821c9)
+
+running 1 test
+test gui::visual_tests::render_cassette_previews ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 1.54s
+
+     Running tests/cli.rs (target/debug/deps/cli-d2a190d32e6594f5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

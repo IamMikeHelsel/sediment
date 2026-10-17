@@ -1,0 +1,6 @@
+{
+  "attempt": "Developer ID package",
+  "exit_code": 0,
+  "timed_out": false,
+  "output": "/Users/mike/Dev/sediment/dist/.package.JK9EZU/sediment.app/Contents/Info.plist: OK\n/Users/mike/Dev/sediment/dist/.package.JK9EZU/sediment.app: replacing existing signature\n/Users/mike/Dev/sediment/dist/.package.JK9EZU/sediment.app: valid on disk\n/Users/mike/Dev/sediment/dist/.package.JK9EZU/sediment.app: satisfies its Designated Requirement\nCreated dist/sediment-0.1.2-macos-arm64.zip\nDeveloper ID signed; notarization and Gatekeeper validation are still required.\n"
+}

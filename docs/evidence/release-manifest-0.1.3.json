@@ -1,0 +1,57 @@
+{
+  "version": "0.1.3",
+  "created_utc": "2026-10-17T19:54:43.771294+00:00",
+  "source_commit": null,
+  "source_note": "Uncommitted local checkout; GitHub destination decision pending. Source hashes identify this candidate, not a published commit.",
+  "source_sha256": {
+    ".github/workflows/ci.yml": "9d64ebc684ff99ee60ebf0245782a86ddc3da105dfbf36a1025a30b8beac3449",
+    "Cargo.lock": "6833d639e08f4994d70cc48984fb04cf1beca1ba0f761fa2fb650958ccf28c06",
+    "Cargo.toml": "58e19ec594fb41c56cd0ca3f719598ec3dd06f36dc99f175003f2ffd77478265",
+    "rust-toolchain.toml": "887f9be066a15585a2c583578e84b0fcb541126d81546276bad3d2ff00d61167",
+    "scripts/benchmark.py": "e8442071edd35f403298b6693b6c3f1988ed26bbdd0dee712c74125b5338cb96",
+    "scripts/check.sh": "e90709dbed78cddf0050c172f522b5715f8a082f7a1fcf965f51a14c4f50eaaf",
+    "scripts/generate-icon.py": "8410406d18a076e2d7098616df449f7f7f7d0a43dd793035522115a4a4d08f47",
+    "scripts/generate-notices.py": "b4b5701c40dd44462dd9f895a123afaa5ca78c4f57df621c051de18d6c1216d3",
+    "scripts/package-cli.sh": "92fbb633b2a476d76830d07e021af2dd4a9fe2f9ace284003300ccfdc23050a1",
+    "scripts/package-macos.sh": "61c560a384b8a6492867feb1ae849101c85ab6c21ea3dd58a1a685bada86b9b6",
+    "scripts/trace-smoke.py": "8680ea03ebadb6f50e44174bbcc73794db9d4454d41fb73d6e540dc0744a4278",
+    "src/archive.rs": "19beb32a7869e9dac221ffaff905a83eaf7116f099d5bf0eef0d5a61b1456731",
+    "src/gui.rs": "94737bbfc4659b21fb04438e40b99ae6c00bdfa1742679a792f098d0bba0b8d2",
+    "src/lib.rs": "452b94290b2c14093df665be20253df4aed639e2a2d8ef02351df37d1d844c8b",
+    "src/main.rs": "403d8148b3b588a4b5f527a71fab6fa55118c8a14fdd152d2232ed1afce27d85",
+    "tests/cli.rs": "32b312581553be2e44114443c681ca6650555ccdb1559af41c689c1fe73a6a2f"
+  },
+  "products": {
+    "sediment-0.1.3-cli-darwin-arm64.tar.gz": {
+      "sha256": "c0b90dcea1af6b76f295b75a2ff19f89c0c2e8de173103c21109d0b5eee1a815",
+      "bytes": 921933
+    },
+    "sediment-0.1.3-macos-arm64.zip": {
+      "sha256": "b8828c0876d5f93cf6936b4621620c0aa918734acd2aec200f48d7711b29c991",
+      "bytes": 6478345
+    }
+  },
+  "desktop_features": [
+    "gui"
+  ],
+  "cli_features": [],
+  "unsigned_desktop_sha256": "1a887e7aae8ed5cbf39f355233e4ce7c9bd9166ba67438d766b7a3de9857e455",
+  "unsigned_cli_sha256": "0f61602dc0d92442bff71a8dcc026e330e24471065c67d484a8615159db255b0",
+  "signed_desktop_sha256": "ad98624c2f48602f403c7560fb14ca8fb3fc076c4ced1d682b31fb8b5f9f1198",
+  "signed_cli_sha256": "a652ec86e498acf0166aa36848284fec6249632f58afd3f8cee9f1dc5761efa5",
+  "desktop_signature_verification": {
+    "exit_code": 0,
+    "output": "/Users/mike/Dev/sediment/dist/sediment.app: valid on disk\n/Users/mike/Dev/sediment/dist/sediment.app: satisfies its Designated Requirement"
+  },
+  "cli_signature_verification": {
+    "exit_code": 0,
+    "output": "/var/folders/my/gvpc8lhn61b07vzgm7fxmnmh0000gn/T/sediment-package-check-jfpr8_wr/sediment: valid on disk\n/var/folders/my/gvpc8lhn61b07vzgm7fxmnmh0000gn/T/sediment-package-check-jfpr8_wr/sediment: satisfies its Designated Requirement"
+  },
+  "packaged_cli_roundtrip": "passed; independent payload comparison",
+  "gatekeeper": {
+    "exit_code": 3,
+    "output": "/Users/mike/Dev/sediment/dist/sediment.app: rejected\nsource=Unnotarized Developer ID"
+  },
+  "native_acceptance": "pending; computer-use startup failed",
+  "published": false
+}
