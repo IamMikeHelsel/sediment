@@ -12,3 +12,7 @@ pub mod archive_name;
 pub mod adler32;
 pub mod zip_payload;
 pub mod huffman;
+pub mod deflate_tables;
+pub mod lz77;
+pub mod deflate_stored;
+pub mod huffman_decode;
