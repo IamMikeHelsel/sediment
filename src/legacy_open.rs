@@ -441,15 +441,15 @@ pub fn open_legacy<'a>(
         None => {
             let base = base_name(archive_name);
             let sfx = ends_with_ci(base, b".exe");
-            if ends_with_ci(base, b".arj") || sfx {
-                if let Ok(r) = ArjReader::new(bytes, limits, SFX_SCAN) {
-                    return Ok(Box::new(r));
-                }
+            if (ends_with_ci(base, b".arj") || sfx)
+                && let Ok(r) = ArjReader::new(bytes, limits, SFX_SCAN)
+            {
+                return Ok(Box::new(r));
             }
-            if ends_with_ci(base, b".lzh") || ends_with_ci(base, b".lha") || sfx {
-                if let Ok(r) = LzhReader::new(bytes, limits, SFX_SCAN) {
-                    return Ok(Box::new(r));
-                }
+            if (ends_with_ci(base, b".lzh") || ends_with_ci(base, b".lha") || sfx)
+                && let Ok(r) = LzhReader::new(bytes, limits, SFX_SCAN)
+            {
+                return Ok(Box::new(r));
             }
             Err(ReaderError::Unsupported)
         }

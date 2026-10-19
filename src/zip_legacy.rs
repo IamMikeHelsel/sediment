@@ -68,7 +68,7 @@ impl<'a> LsbBits<'a> {
             v |= u32::from(self.data.get(byte + i).copied().unwrap_or(0)) << (8 * i);
         }
         self.pos += n as usize;
-        Ok((v >> (self.pos - n as usize) % 8) & ((1u32 << n) - 1))
+        Ok((v >> ((self.pos - n as usize) % 8)) & ((1u32 << n) - 1))
     }
 }
 
@@ -130,9 +130,9 @@ impl ShrinkTable {
                 is_prefix[self.prefix[c] as usize] = true;
             }
         }
-        for c in SHRINK_FIRST..SHRINK_TABLE {
-            if self.in_use[c] && !is_prefix[c] {
-                self.in_use[c] = false;
+        for (used, &prefix) in self.in_use.iter_mut().zip(&is_prefix).skip(SHRINK_FIRST) {
+            if !prefix {
+                *used = false;
             }
         }
         self.advance_free(SHRINK_FIRST);
@@ -274,8 +274,8 @@ fn read_sf_tree(input: &[u8], pos: &mut usize, nsym: usize) -> Result<SfTree, Zi
         }
         tree.syms[li].push(s);
     }
-    for l in 1..=16 {
-        tree.base[l] = first_of_len[l].unwrap_or(0);
+    for (base, first) in tree.base.iter_mut().zip(first_of_len) {
+        *base = first.unwrap_or(0);
     }
     Ok(tree)
 }

@@ -399,9 +399,9 @@ fn payload_corruption_is_detected() {
             let mut m = b.clone();
             m[at] ^= 0x5A;
             if let Ok(r) = open(&m, name) {
-                for i in 0..r.entries().len() {
+                for (i, w) in want.iter().enumerate().take(r.entries().len()) {
                     if let Ok(d) = r.read(i) {
-                        assert_eq!(d, want[i], "{name} flip@{at} entry {i}");
+                        assert_eq!(&d, w, "{name} flip@{at} entry {i}");
                     }
                 }
             }
