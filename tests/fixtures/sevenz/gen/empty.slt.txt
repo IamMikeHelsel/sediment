@@ -1,0 +1,18 @@
+
+7-Zip (z) 26.04 (arm64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-10-05
+ 64-bit arm_v:8-A locale=C.UTF-8 Threads:20 OPEN_MAX:32768, ASM
+
+Scanning the drive for archives:
+1 file, 32 bytes (1 KiB)
+
+Listing archive: empty.7z
+
+--
+Path = empty.7z
+Type = 7z
+Physical Size = 32
+Headers Size = 32
+Solid = -
+Blocks = 0
+
+----------

@@ -1,0 +1,4 @@
+# file password header_random(11) method descriptor
+zipcrypto_stored.zip 68756e74657232 b9bc1da93060fe9af31378 0 0
+zipcrypto_deflate.zip 636f727265637420686f727365 fa7e9d971b34996a0302d3 8 0
+zipcrypto_descriptor.zip 70c3a4737377c3b67264 3c411e850708343a13f12e 0 1

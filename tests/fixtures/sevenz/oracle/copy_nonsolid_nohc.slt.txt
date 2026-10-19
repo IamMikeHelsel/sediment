@@ -1,0 +1,109 @@
+
+7-Zip (z) 26.04 (arm64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-10-05
+ 64-bit arm_v:8-A locale=C.UTF-8 Threads:20 OPEN_MAX:32768, ASM
+
+Scanning the drive for archives:
+1 file, 2753 bytes (3 KiB)
+
+Listing archive: ../out/copy_nonsolid_nohc.7z
+
+--
+Path = ../out/copy_nonsolid_nohc.7z
+Type = 7z
+Physical Size = 2753
+Headers Size = 402
+Method = Copy
+Solid = -
+Blocks = 5
+
+----------
+Path = dir
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = D drwxr-xr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = dir/sub
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = D drwxrwxr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = emptydir
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = D drwxrwxr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = empty.txt
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-rw-r--
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = a.txt
+Size = 1620
+Packed Size = 1620
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-rw-r--
+CRC = 989E5E02
+Encrypted = -
+Method = Copy
+Block = 0
+
+Path = b.bin
+Size = 700
+Packed Size = 700
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-rw-r--
+CRC = 67C52D4F
+Encrypted = -
+Method = Copy
+Block = 1
+
+Path = dir/sub/nested.txt
+Size = 7
+Packed Size = 7
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-rw-r--
+CRC = EBAB958D
+Encrypted = -
+Method = Copy
+Block = 2
+
+Path = hello.txt
+Size = 11
+Packed Size = 11
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-r-----
+CRC = 99504610
+Encrypted = -
+Method = Copy
+Block = 3
+
+Path = héllo_日本.txt
+Size = 13
+Packed Size = 13
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-rw-r--
+CRC = 6C14D048
+Encrypted = -
+Method = Copy
+Block = 4
+
