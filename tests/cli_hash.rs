@@ -157,7 +157,7 @@ fn unreadable_file_is_a_warning() {
     fs::write(t.0.join("ok"), b"abc").unwrap();
     let locked = t.0.join("locked");
     fs::write(&locked, b"secret").unwrap();
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0)).unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
     if fs::read(&locked).is_ok() {
         return; // running as root; permissions are not enforced
     }
@@ -216,19 +216,19 @@ fn hash_reader_streams_across_chunks() {
 fn hash_inputs_limits() {
     let tree = fixtures().join("tree");
     let m = [HashMethod::Crc32];
-    let rep = hash_inputs(&[tree.clone()], &m, HashLimits::default()).unwrap();
+    let rep = hash_inputs(std::slice::from_ref(&tree), &m, HashLimits::default()).unwrap();
     assert_eq!((rep.files, rep.folders, rep.total_size), (5, 3, 71049));
     assert_eq!(rep.rows.len(), 8);
     assert!(rep.warnings.is_empty());
     assert_eq!(format_report(&rep), expected("expected_default.txt"));
     let few = HashLimits { max_entries: 4, ..HashLimits::default() };
-    assert_eq!(hash_inputs(&[tree.clone()], &m, few), Err(HashCliError::LimitExceeded));
+    assert_eq!(hash_inputs(std::slice::from_ref(&tree), &m, few), Err(HashCliError::LimitExceeded));
     let small = HashLimits { max_total_bytes: 71048, ..HashLimits::default() };
-    assert_eq!(hash_inputs(&[tree.clone()], &m, small), Err(HashCliError::LimitExceeded));
+    assert_eq!(hash_inputs(std::slice::from_ref(&tree), &m, small), Err(HashCliError::LimitExceeded));
     let exact = HashLimits { max_total_bytes: 71049, ..HashLimits::default() };
-    assert!(hash_inputs(&[tree.clone()], &m, exact).is_ok());
+    assert!(hash_inputs(std::slice::from_ref(&tree), &m, exact).is_ok());
     let shallow = HashLimits { max_depth: 1, ..HashLimits::default() };
-    assert_eq!(hash_inputs(&[tree.clone()], &m, shallow), Err(HashCliError::LimitExceeded));
+    assert_eq!(hash_inputs(std::slice::from_ref(&tree), &m, shallow), Err(HashCliError::LimitExceeded));
     assert_eq!(hash_inputs(&[tree], &[], HashLimits::default()), Err(HashCliError::Usage));
     // Limits accumulate across inputs.
     let a = fixtures().join("tree/a.txt");
