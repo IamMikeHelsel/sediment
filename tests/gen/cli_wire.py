@@ -30,6 +30,8 @@ import sys
 import tarfile
 import zipfile
 
+sys.dont_write_bytecode = True
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "fixtures", "cli_wire")
 MTIME = 1709618828  # 2024-03-05 06:07:08 UTC
