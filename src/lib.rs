@@ -89,3 +89,4 @@ pub mod crypto_random;
 pub mod sevenz_aes_coder;
 pub mod zip_crypt;
 pub mod archive_open_crypt;
+pub mod cli_crypt;

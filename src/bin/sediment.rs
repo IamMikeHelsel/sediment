@@ -14,6 +14,9 @@
 //!   -aoa overwrite all, -aos skip existing, -aou auto-rename new files,
 //!   -snl create symbolic links (default: skip them with a warning),
 //!   -- end of switches.
+//! Encryption (see `cli_crypt`): -p<password> for l/t/x/e/a; for `a`,
+//!   -mem=ZipCrypto|AES128|AES192|AES256 (.zip) and -mhe=on (.7z). A
+//!   missing or wrong password is a fatal error (exit 2), as in 7-Zip.
 //! Exit codes: 0 success; 1 warning (some members not extracted) or, for
 //!   `list`/`test`, any failure; 2 fatal error or usage error. `a` keeps the
 //!   codes documented in `cli_add` (1 fatal, 2 usage, 3 inputs skipped).
@@ -23,9 +26,10 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use sediment_engine::archive_name::escape_name;
-use sediment_engine::archive_open::open_named;
+use sediment_engine::archive_open_crypt::{OpenCryptError, OpenedArchive, PasswordProblem, open_named_with_password};
 use sediment_engine::archive_reader::{ArchiveReader, ReaderError, ReaderLimits};
 use sediment_engine::cli_add::run_add;
+use sediment_engine::cli_crypt::{CryptSwitches, add_needs_crypt, run_add_crypt, take_crypt_switches};
 use sediment_engine::extract_fs::{execute_plan, ExtractOptions, OverwritePolicy, SymlinkPolicy};
 use sediment_engine::extract_plan::{
     normalize_path, plan_extraction, EntryKind, Plan, PlanKind, PlanOptions, PlanWarning, PlannedEntry,
@@ -78,20 +82,44 @@ fn main() {
     if cmd == "list" || cmd == "test" {
         legacy(&cmd, rest);
     } else if cmd == "l" || cmd == "t" {
+        let (sw, rest) = crypt_switches(&rest);
         let path = single_path(rest);
         let buf = read_archive(Path::new(&path), MAX_ARCHIVE);
-        let reader = open_reader(&buf, Path::new(&path));
+        let opened = open_reader(&buf, Path::new(&path), &sw);
         if cmd == "l" {
-            cmd_list(reader.as_ref());
+            cmd_list(opened.reader.as_ref());
         } else {
-            cmd_test(reader.as_ref());
+            cmd_test(&opened);
         }
     } else if cmd == "x" || cmd == "e" {
-        cmd_extract(cmd == "e", rest);
+        let (sw, rest) = crypt_switches(&rest);
+        cmd_extract(cmd == "e", rest, &sw);
     } else if cmd == "a" {
+        let (sw, rest) = crypt_switches(&rest);
+        if add_needs_crypt(&sw, &rest) {
+            process::exit(run_add_crypt(&rest, &sw));
+        }
         process::exit(run_add(&rest));
     } else {
         err("unknown command", 2);
+    }
+}
+
+fn crypt_switches(rest: &[OsString]) -> (CryptSwitches, Vec<OsString>) {
+    match take_crypt_switches(rest) {
+        Ok(v) => v,
+        Err(m) => {
+            let _ = writeln!(io::stderr().lock(), "sediment: {m}");
+            process::exit(EXIT_FATAL);
+        }
+    }
+}
+
+/// 7-Zip reports password trouble as a fatal error (exit 2).
+fn password_fail(problem: PasswordProblem, name: &[u8]) -> ! {
+    match problem {
+        PasswordProblem::Required => err_entry("password required (use -pPASSWORD)", name, EXIT_FATAL),
+        PasswordProblem::Wrong => err_entry("wrong password", name, EXIT_FATAL),
     }
 }
 
@@ -212,13 +240,17 @@ fn file_name_bytes(p: &Path) -> Vec<u8> {
     p.file_name().map(|n| n.as_encoded_bytes().to_vec()).unwrap_or_default()
 }
 
-fn open_reader<'a>(buf: &'a [u8], path: &Path) -> Box<dyn ArchiveReader + 'a> {
-    match open_named(buf, &file_name_bytes(path), ReaderLimits::default()) {
+fn open_reader<'a>(buf: &'a [u8], path: &Path, sw: &CryptSwitches) -> OpenedArchive<'a> {
+    match open_named_with_password(buf, &file_name_bytes(path), ReaderLimits::default(), sw.password.as_deref()) {
         Ok(r) => r,
-        Err(ReaderError::Unsupported) => err("unsupported archive format", EXIT_FATAL),
-        Err(ReaderError::CrcMismatch) => err("data error (checksum mismatch)", EXIT_FATAL),
-        Err(ReaderError::LimitExceeded) => err("archive exceeds limits", EXIT_FATAL),
-        Err(ReaderError::Allocation) => err("allocation failed", EXIT_FATAL),
+        Err(OpenCryptError::PasswordRequired) => {
+            err("cannot open encrypted archive: password required (use -pPASSWORD)", EXIT_FATAL)
+        }
+        Err(OpenCryptError::WrongPassword) => err("cannot open encrypted archive. Wrong password?", EXIT_FATAL),
+        Err(OpenCryptError::Reader(ReaderError::Unsupported)) => err("unsupported archive format", EXIT_FATAL),
+        Err(OpenCryptError::Reader(ReaderError::CrcMismatch)) => err("data error (checksum mismatch)", EXIT_FATAL),
+        Err(OpenCryptError::Reader(ReaderError::LimitExceeded)) => err("archive exceeds limits", EXIT_FATAL),
+        Err(OpenCryptError::Reader(ReaderError::Allocation)) => err("allocation failed", EXIT_FATAL),
         Err(_) => err("parse error", EXIT_FATAL),
     }
 }
@@ -250,12 +282,16 @@ fn cmd_list(reader: &dyn ArchiveReader) {
     }
 }
 
-fn cmd_test(reader: &dyn ArchiveReader) {
+fn cmd_test(opened: &OpenedArchive<'_>) {
+    let reader = opened.reader.as_ref();
     let mut total: u64 = 0;
     let entries = reader.entries();
     for (i, e) in entries.iter().enumerate() {
         match reader.read(i) {
             Ok(d) if !matches!(e.kind, EntryKind::File) || d.len() as u64 == e.size => {}
+            Err(_) if opened.password_problem().is_some() => {
+                password_fail(opened.password_problem().unwrap_or(PasswordProblem::Wrong), &e.path)
+            }
             Err(ReaderError::Unsupported) => err_entry("unsupported compression method", &e.path, EXIT_FATAL),
             _ => err_entry("data error", &e.path, EXIT_FATAL),
         }
@@ -375,10 +411,11 @@ fn remap(plan: &mut Plan, map: &[usize]) {
     }
 }
 
-fn cmd_extract(flat: bool, rest: Vec<OsString>) {
+fn cmd_extract(flat: bool, rest: Vec<OsString>, sw: &CryptSwitches) {
     let args = parse_extract_args(rest);
     let buf = read_archive(Path::new(&args.archive), MAX_ARCHIVE);
-    let reader = open_reader(&buf, Path::new(&args.archive));
+    let opened = open_reader(&buf, Path::new(&args.archive), sw);
+    let reader = &opened.reader;
     let entries = reader.entries();
     let (planned, map) = if flat {
         flatten(entries)
@@ -414,6 +451,9 @@ fn cmd_extract(flat: bool, rest: Vec<OsString>) {
     let report = match execute_plan(&plan, reader.as_ref(), &args.out_dir, &opts) {
         Ok(r) => r,
         Err(f) => match f.index {
+            Some(i) if opened.password_problem().is_some() => {
+                password_fail(opened.password_problem().unwrap_or(PasswordProblem::Wrong), &entries[i].path)
+            }
             Some(i) => err_entry(&format!("cannot extract ({:?})", f.error), &entries[i].path, EXIT_FATAL),
             None => err_entry(&format!("cannot extract ({:?})", f.error), b"", EXIT_FATAL),
         },
