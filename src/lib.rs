@@ -65,3 +65,4 @@ pub mod vhd_footer;
 pub mod ihex_decode;
 pub mod rpm_header;
 pub mod lzw_z;
+pub mod reader_ihex;
