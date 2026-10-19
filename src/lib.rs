@@ -64,4 +64,8 @@ pub mod sevenz_read;
 pub mod tar_create;
 pub mod tar_read;
 pub mod xz_decode;
+pub mod zip64;
 pub mod zip_create;
+pub mod zip_descriptor;
+pub mod zip_extra_read;
+pub mod zip_reader2;
