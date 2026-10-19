@@ -755,7 +755,7 @@ fn read_names(data: &[u8], n: usize, limits: &SevenZLimits) -> Result<Vec<String
         return Err(SevenZReadError::Unsupported);
     }
     let body = &data[1..];
-    if body.len() % 2 != 0 {
+    if !body.len().is_multiple_of(2) {
         return Err(SevenZReadError::Malformed);
     }
     if body.len() / 2 > limits.max_name_units {
@@ -763,7 +763,7 @@ fn read_names(data: &[u8], n: usize, limits: &SevenZLimits) -> Result<Vec<String
     }
     let mut names = Vec::new();
     names.try_reserve_exact(n).map_err(|_| SevenZReadError::Allocation)?;
-    let mut units = body.chunks_exact(2).map(|p| u16::from_le_bytes([p[0], p[1]]));
+    let mut units = body.as_chunks::<2>().0.iter().map(|p| u16::from_le_bytes(*p));
     for _ in 0..n {
         let mut s = String::new();
         let mut terminated = false;
