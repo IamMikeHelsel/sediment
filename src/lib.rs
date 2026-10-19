@@ -16,3 +16,4 @@ pub mod deflate_tables;
 pub mod lz77;
 pub mod deflate_stored;
 pub mod huffman_decode;
+pub mod inflate;
