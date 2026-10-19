@@ -68,9 +68,10 @@ fn bad_checks_detected() {
 }
 
 #[test]
-fn unsupported_filters() {
-    assert_eq!(dec("text.delta.xz"), Err(XzError::Unsupported));
-    assert_eq!(dec("text.x86.xz"), Err(XzError::Unsupported));
+fn delta_and_bcj_pre_filters() {
+    // Python lzma made these with [Delta|X86, LZMA2] filter chains.
+    assert_eq!(dec("text.delta.xz").unwrap(), expected("text"));
+    assert_eq!(dec("text.x86.xz").unwrap(), expected("text"));
 }
 
 #[test]
