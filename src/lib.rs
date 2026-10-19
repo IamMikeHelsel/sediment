@@ -23,3 +23,8 @@ pub mod zlib_wrapper;
 pub mod gzip_wrapper;
 pub mod ustar_header;
 pub mod deflate_encode;
+pub mod crc64_xz;
+pub mod ustar_write_header;
+pub mod lzma_properties;
+pub mod sevenz_start;
+pub mod xz_vli;
