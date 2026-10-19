@@ -78,3 +78,4 @@ pub mod lzma_encode;
 pub mod lzma2_encode;
 pub mod xz_encode;
 pub mod archive_open;
+pub mod zstd_decode;
