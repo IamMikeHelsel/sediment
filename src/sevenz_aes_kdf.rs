@@ -157,13 +157,8 @@ pub fn sevenz_aes_derive_key(
     }
     let mut key = [0u8; SEVENZ_AES_KEY_LEN];
     if num_cycles_power == SEVENZ_AES_NO_HASH {
-        let mut pos = 0;
-        for &byte in salt.iter().chain(password_utf16le.iter()) {
-            if pos == SEVENZ_AES_KEY_LEN {
-                break;
-            }
-            key[pos] = byte;
-            pos += 1;
+        for (dst, &src) in key.iter_mut().zip(salt.iter().chain(password_utf16le.iter())) {
+            *dst = src;
         }
         return Ok(key);
     }

@@ -214,8 +214,8 @@ impl Aes {
         let rounds = nk + 6;
         let total = 4 * (rounds + 1);
         let mut ek = [0u32; MAX_WORDS];
-        for (i, chunk) in key.chunks_exact(4).enumerate() {
-            ek[i] = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        for (w, chunk) in ek.iter_mut().zip(key.as_chunks::<4>().0) {
+            *w = u32::from_be_bytes(*chunk);
         }
         for i in nk..total {
             let mut temp = ek[i - 1];
@@ -349,7 +349,7 @@ impl AesCbc {
 
     /// Encrypt `data` in place; its length must be a multiple of 16.
     pub fn encrypt(&mut self, data: &mut [u8]) -> Result<(), AesError> {
-        if data.len() % AES_BLOCK_LEN != 0 {
+        if !data.len().is_multiple_of(AES_BLOCK_LEN) {
             return Err(AesError::InvalidDataLength);
         }
         let (blocks, _) = data.as_chunks_mut::<AES_BLOCK_LEN>();
@@ -365,7 +365,7 @@ impl AesCbc {
 
     /// Decrypt `data` in place; its length must be a multiple of 16.
     pub fn decrypt(&mut self, data: &mut [u8]) -> Result<(), AesError> {
-        if data.len() % AES_BLOCK_LEN != 0 {
+        if !data.len().is_multiple_of(AES_BLOCK_LEN) {
             return Err(AesError::InvalidDataLength);
         }
         let (blocks, _) = data.as_chunks_mut::<AES_BLOCK_LEN>();
