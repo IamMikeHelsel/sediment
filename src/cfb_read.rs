@@ -306,17 +306,22 @@ impl<'a> CfbArchive<'a> {
         let per_sector = ss / DIR_ENTRY;
         let max_dirs = dir_chain.len().saturating_mul(per_sector);
         let mut raw: Vec<RawDir> = Vec::new();
-        raw.try_reserve(max_dirs.min(limits.max_entries.saturating_add(1)))
-            .map_err(|_| CfbError::Allocation)?;
-        'outer: for &s in &dir_chain {
+        // max_dirs <= file size / 128, so this is bounded by the input.
+        raw.try_reserve(max_dirs).map_err(|_| CfbError::Allocation)?;
+        let mut used = 0usize;
+        for &s in &dir_chain {
             let sec = arc.sector(s)?;
             for k in 0..per_sector {
                 let e = &sec[k * DIR_ENTRY..(k + 1) * DIR_ENTRY];
-                if raw.len() > limits.max_entries {
-                    break 'outer;
-                }
                 let name_len = le16(e, 64) as usize;
                 let typ = e[66];
+                if typ != 0 {
+                    used += 1;
+                    // the root entry is not listed
+                    if used > limits.max_entries.saturating_add(1) {
+                        return Err(CfbError::LimitExceeded);
+                    }
+                }
                 let name = if typ == 0 || name_len == 0 {
                     Vec::new()
                 } else {
