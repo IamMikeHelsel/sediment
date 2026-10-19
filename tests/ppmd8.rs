@@ -216,7 +216,7 @@ fn random_streams_never_panic() {
         let len = (r.next() % 600) as usize;
         let buf: Vec<u8> = (0..len).map(|_| r.next() as u8).collect();
         let order = 2 + (r.next() % 15) as u32;
-        let restore = if r.next() % 2 == 0 { RestoreMethod::Restart } else { RestoreMethod::CutOff };
+        let restore = if r.next().is_multiple_of(2) { RestoreMethod::Restart } else { RestoreMethod::CutOff };
         let p = props(order, 1, restore);
         let _ = decode(p, &buf, (r.next() % 3000) as usize, MEM_CAP);
         let _ = decode_to_end_marker(p, &buf, 3000, MEM_CAP);

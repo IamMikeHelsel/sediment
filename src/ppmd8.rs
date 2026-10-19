@@ -149,10 +149,10 @@ fn decode_inner(
         return Err(if rc.overrun > 0 { Ppmd8Error::UnexpectedEof } else { Ppmd8Error::CorruptData });
     }
     loop {
-        if let Some(n) = exact {
-            if out.len() == n {
-                break;
-            }
+        if let Some(n) = exact
+            && out.len() == n
+        {
+            break;
         }
         let sym = model.decode_symbol(&mut rc);
         if model.fault.get() || rc.fault {
@@ -972,18 +972,18 @@ impl Model {
         }
         self.units_start = node;
 
-        for i in 0..N_INDEXES {
+        for (i, cnt) in count.iter_mut().enumerate() {
             let mut link = Link::Head(i);
             let mut guard = 0u64;
-            while count[i] != 0 {
+            while *cnt != 0 {
                 let mut node = self.get_link(link);
                 while self.rd32(node) == 0 {
                     let nx = self.rd32(node + 4);
                     self.set_link(link, nx);
                     node = nx;
                     self.stamps[i] = self.stamps[i].wrapping_sub(1);
-                    count[i] -= 1;
-                    if count[i] == 0 {
+                    *cnt -= 1;
+                    if *cnt == 0 {
                         break;
                     }
                     guard += 1;
@@ -1050,8 +1050,8 @@ impl Model {
             while self.t.ns2indx[i] as usize == m {
                 i += 1;
             }
-            for k in 0..8 {
-                let val = (BIN_SCALE - INIT_BIN_ESC[k] as u32 / (i as u32 + 1)) as u16;
+            for (k, &esc) in INIT_BIN_ESC.iter().enumerate() {
+                let val = (BIN_SCALE - esc as u32 / (i as u32 + 1)) as u16;
                 for r in (0..64).step_by(8) {
                     self.bin_summ[m][k + r] = val;
                 }

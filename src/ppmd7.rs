@@ -125,10 +125,10 @@ fn decode_inner(
         return Err(if rc.overrun > 0 { Ppmd7Error::UnexpectedEof } else { Ppmd7Error::CorruptData });
     }
     loop {
-        if let Some(n) = exact {
-            if out.len() == n {
-                break;
-            }
+        if let Some(n) = exact
+            && out.len() == n
+        {
+            break;
         }
         let sym = model.decode_symbol(&mut rc);
         if model.fault.get() || rc.fault {
@@ -904,8 +904,8 @@ impl Model {
             self.write_state(s, [i as u8, 1, 0, 0, 0, 0]);
         }
         for i in 0..128 {
-            for k in 0..8 {
-                let val = (BIN_SCALE - INIT_BIN_ESC[k] as u32 / (i as u32 + 2)) as u16;
+            for (k, &esc) in INIT_BIN_ESC.iter().enumerate() {
+                let val = (BIN_SCALE - esc as u32 / (i as u32 + 2)) as u16;
                 for m in (0..64).step_by(8) {
                     self.bin_summ[i][k + m] = val;
                 }

@@ -42,7 +42,7 @@ fn stress_roundtrip_and_fuzz() {
         let p8 = ppmd8::Ppmd8Properties {
             order: (2 + r.next() % 15) as u8,
             memory_mb: (1 + r.next() % 3) as u16,
-            restore: if r.next() % 2 == 0 { ppmd8::RestoreMethod::Restart } else { ppmd8::RestoreMethod::CutOff },
+            restore: if r.next().is_multiple_of(2) { ppmd8::RestoreMethod::Restart } else { ppmd8::RestoreMethod::CutOff },
         };
         let e8 = ppmd8::encode_zip(p8, &data, CAP).unwrap();
         assert_eq!(ppmd8::decode_zip(&e8, n, CAP).unwrap(), data, "{p8:?}");

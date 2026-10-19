@@ -77,7 +77,7 @@ pub fn gen_cycle(seed: u64, n: usize) -> Vec<u8> {
     let mut out = Vec::new();
     let mut i: u64 = 0;
     while out.len() < n {
-        let add = if i % 97 == 0 { r.next() % 3 } else { 0 };
+        let add = if i.is_multiple_of(97) { r.next() % 3 } else { 0 };
         out.push(((i + add) & 0xFF) as u8);
         i += 1;
     }
