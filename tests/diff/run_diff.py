@@ -95,7 +95,8 @@ def crate_tarball(root):
 
 def drive(args):
     blob = crate_tarball(CRATE)
-    passthru = []
+    rev = subprocess.run(["git", "-C", CRATE, "describe", "--always", "--dirty"], capture_output=True).stdout.decode().strip()
+    passthru = ["--rev", rev or "?"]
     if args.only:
         passthru += ["--only", args.only]
     if args.jobs:
@@ -919,7 +920,7 @@ def run_mode(args):
         log.append(f"WARNING: oracle is not the pinned {ORACLE_VERSION}: {ver}")
     sed = args.sediment or build_sediment(log)
     rev = subprocess.run(["git", "-C", CRATE, "rev-parse", "--short", "HEAD"], capture_output=True).stdout.decode().strip()
-    rev = rev or "(working tree copy)"
+    rev = args.rev or rev or "(working tree copy)"
     work = os.path.abspath(args.work or tempfile.mkdtemp(prefix="sediment-diff-"))
     os.makedirs(work, exist_ok=True)
     tree, links, cdir = (os.path.join(work, d) for d in ("tree", "links", "corpus"))
@@ -966,6 +967,7 @@ def main():
     ap.add_argument("--only")
     ap.add_argument("--jobs", type=int)
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--rev", help="revision label for the report (set by the driver)")
     args = ap.parse_args()
     return run_mode(args) if args.run else drive(args)
 
