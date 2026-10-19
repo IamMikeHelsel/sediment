@@ -38,3 +38,5 @@ pub mod bit_writer;
 pub mod pax_record_write;
 pub mod tar_read;
 pub mod archive_detect;
+pub mod sevenz_header;
+pub mod sevenz_read;
