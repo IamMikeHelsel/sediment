@@ -803,3 +803,89 @@ fn malformed_inputs_never_panic() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Standard streams and volumes combined with the compat switches
+// ---------------------------------------------------------------------------
+
+fn run_stdin(dir: Option<&Path>, args: &[OsString], input: &[u8]) -> Output {
+    use std::io::Write as _;
+    use std::process::Stdio;
+    let mut c = Proc::new(BIN);
+    c.args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    if let Some(d) = dir {
+        c.current_dir(d);
+    }
+    let mut child = c.spawn().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let data = input.to_vec();
+    let feeder = std::thread::spawn(move || {
+        let _ = stdin.write_all(&data);
+    });
+    let out = child.wait_with_output().unwrap();
+    feeder.join().unwrap();
+    out
+}
+
+#[test]
+fn so_and_si_with_selection() {
+    let zip = wire("tree.zip");
+    let tree = |p: &str| fs::read(wire("tree").join(p)).unwrap();
+    // -so writes only the selected files, in archive order; -bb1 names go to stderr.
+    let o = run(&argv!["x", "-so", "-bb1", &zip, "-r", "*.txt", "-x!empty.txt", "-xr!long*"]);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let mut want = tree("data/words.txt");
+    want.extend(tree("docs/café.txt"));
+    want.extend(tree("docs/deep/nested/leaf.txt"));
+    want.extend(tree("hello.txt"));
+    assert_eq!(o.stdout, want);
+    assert_eq!(text(&o.stderr), "- data/words.txt\n- docs/caf\\xc3\\xa9.txt\n- docs/deep/nested/leaf.txt\n- hello.txt\n");
+    // -si: every positional is a member name.
+    let bytes = fs::read(&zip).unwrap();
+    let o = run_stdin(None, &argv!["l", "-si", "-ba", "hello.txt", "data/*.bin"], &bytes);
+    assert_eq!(sorted(names(&o)), strs(&["data/prog.bin", "data/random.bin", "hello.txt"]));
+    let o = run_stdin(None, &argv!["t", "-si", "-ba"], &bytes);
+    assert_eq!((code(&o), o.stdout.len()), (0, 0));
+    let o = run_stdin(None, &argv!["l", "-si", "-slt", "-ba", "-tzip", "hello.txt"], &bytes);
+    assert!(text(&o.stdout).starts_with("Path = hello.txt\nFolder = -\n"), "{}", text(&o.stdout));
+    let t = TempDir::new("si-x");
+    let o = run_stdin(None, &argv!["x", "-si", out_arg(&t.0), "docs/deep"], &fs::read(wire("tree.tgz")).unwrap());
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(keys(&snapshot(&t.0)), strs(&["docs", "docs/deep", "docs/deep/nested", "docs/deep/nested/leaf.txt", LONG]));
+}
+
+#[test]
+fn add_to_stdout_and_volumes() {
+    let t = scratch("so-v");
+    let src = t.path("src");
+    // -so: the archive goes to stdout, the summary to stderr; the name only picks the format.
+    let o = run_stdin(Some(&src), &argv!["a", "-so", "out.tar", "-r", "*.txt"], b"");
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert!(text(&o.stderr).starts_with("Created out.tar ("), "{}", text(&o.stderr));
+    assert!(!src.join("out.tar").exists());
+    let l = run_stdin(None, &argv!["l", "-si", "-ba"], &o.stdout);
+    assert_eq!(sorted(names(&l)), strs(&["data/words.txt", CAFE, "docs/deep/nested/leaf.txt", LONG, "empty.txt", "hello.txt"]));
+    // A terminal on stdout is refused (in-process console flag).
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let mut con = Console { stdout: &mut out, stderr: &mut err, stdin: None, interactive: false, stdout_is_terminal: true };
+    assert_eq!(run_args(Command::Add, &argv!["-so", t.path("x.zip"), wire("tree/hello.txt")], &mut con), 7);
+    assert!(out.is_empty());
+    // -v: volumes that read back through `*.001`, with selection preserved.
+    let arc = t.path("v.zip");
+    let o = run_in(Some(&src), &argv!["a", "-v2k", &arc, "*", "-xr!*.bin"]);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert!(text(&o.stdout).contains(" in ") && text(&o.stdout).contains(" volumes ("), "{}", text(&o.stdout));
+    assert!(!arc.exists() && t.path("v.zip.001").exists() && t.path("v.zip.002").exists());
+    let first = t.path("v.zip.001");
+    assert!(!listing(&first).iter().any(|n| n.ends_with(".bin")));
+    let out = t.path("vx");
+    let o = run(&argv!["x", &first, out_arg(&out), "hello.txt"]);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(keys(&snapshot(&out)), strs(&["hello.txt"]));
+    // Existing volumes need -y.
+    let o = run_in(Some(&src), &argv!["a", "-v2k", &arc, "*"]);
+    assert_eq!(code(&o), 2, "{}", text(&o.stderr));
+    let o = run_in(Some(&src), &argv!["a", "-y", "-v2k", &arc, "*"]);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+}
