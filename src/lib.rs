@@ -74,3 +74,6 @@ pub mod zip_descriptor;
 pub mod zip_extra_read;
 pub mod zip_reader2;
 pub mod zipcrypto;
+pub mod lzma_encode;
+pub mod lzma2_encode;
+pub mod xz_encode;
