@@ -116,7 +116,7 @@ CASES = [
     ("zip_bin_o8", "zip", "bin", 14, 5000, 0, 8, "2m"),
     ("zip_cycle_o4", "zip", "cycle", 15, 3000, 0, 4, "1m"),
     ("zip_small_o6", "zip", "text", 16, 300, 10, 6, "1m"),
-    ("zip_lowmem_o6", "zip", "text", 17, 240000, 40, 6, "1m"),
+    ("zip_lowmem_o16_restart", "zip", "text", 17, 120000, 40, 16, "1m"),
     ("zip_lowmem_o16_cut", "zip", "text", 18, 240000, 40, 16, "1m:x=9"),
     ("zip_lowmem_bin_o10_cut", "zip", "bin", 19, 30000, 0, 10, "1m:x=9"),
     ("zip_text_o8_cut", "zip", "text", 20, 5000, 100, 8, "1m:x=9"),

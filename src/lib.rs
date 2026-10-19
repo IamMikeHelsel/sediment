@@ -37,3 +37,4 @@ pub mod zip_dos_time;
 pub mod bit_writer;
 pub mod pax_record_write;
 pub mod ppmd7;
+pub mod ppmd8;
