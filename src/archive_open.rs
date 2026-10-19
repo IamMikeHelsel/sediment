@@ -544,6 +544,7 @@ impl<'a> SevenZReader<'a> {
         reader.map.try_reserve_exact(n).map_err(|_| ReaderError::Allocation)?;
         reader.entries.try_reserve_exact(n).map_err(|_| ReaderError::Allocation)?;
         let mut total: u64 = 0;
+        let mut links = Vec::new();
         for i in 0..n {
             let e = &reader.archive.entries()[i];
             if e.is_anti {
@@ -555,8 +556,9 @@ impl<'a> SevenZReader<'a> {
                 if e.size > MAX_LINK_TARGET {
                     return Err(ReaderError::LimitExceeded);
                 }
-                let target = reader.archive.extract_entry(i, &reader.codecs)?;
-                EntryKind::Symlink { target }
+                links.push(reader.entries.len());
+                // Filled in below through the folder cache.
+                EntryKind::Symlink { target: Vec::new() }
             } else if e.is_dir || e.has_dir_attribute() || fmt == Some(S_IFDIR) {
                 EntryKind::Dir
             } else {
@@ -572,6 +574,14 @@ impl<'a> SevenZReader<'a> {
             let path = e.name.as_bytes().to_vec();
             reader.entries.push(PlannedEntry { path, kind, size, mode, mtime });
             reader.map.push(i);
+        }
+        // Entries are in folder order, so the one-folder cache decodes each
+        // folder holding links once.
+        for k in links {
+            let data = reader.read(k)?;
+            if let Some(PlannedEntry { kind: EntryKind::Symlink { target }, .. }) = reader.entries.get_mut(k) {
+                *target = data;
+            }
         }
         Ok(reader)
     }

@@ -367,6 +367,23 @@ fn tar_links_need_snl() {
 }
 
 #[test]
+fn sevenz_links_need_snl() {
+    let t = TempDir::new("7zlinks");
+    let o = run(&["x".as_ref(), out_arg(&t.0).as_ref(), fx("7z/links.7z").as_os_str()]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o.stderr));
+    let s = snapshot(&t.0);
+    assert_eq!(s.get("target.txt"), Some(&Node::File(b"tgt\n".to_vec())));
+    assert!(!s.contains_key("sub/up.txt"));
+    #[cfg(unix)]
+    {
+        let t = TempDir::new("7zlinks-snl");
+        let o = run(&["x".as_ref(), "-snl".as_ref(), out_arg(&t.0).as_ref(), fx("7z/links.7z").as_os_str()]);
+        assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+        assert_eq!(snapshot(&t.0).get("sub/up.txt"), Some(&Node::Link(b"../target.txt".to_vec())));
+    }
+}
+
+#[test]
 fn corrupt_inputs_fail_cleanly() {
     for name in ["bad_crc.tar.gz", "truncated.tar.xz", "corrupt.bz2", "bad_checksum.tar", "7z/tree_ppmd.7z"] {
         let o = run(&["t".as_ref(), fx(name).as_os_str()]);

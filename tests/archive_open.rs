@@ -111,6 +111,12 @@ fn tar_links_and_specials() {
     assert_eq!(kinds[2], (b"sub/up.txt".to_vec(), EntryKind::Symlink { target: b"../target.txt".to_vec() }, 0));
     assert_eq!(kinds[3], (b"hard.txt".to_vec(), EntryKind::Hardlink { target: b"target.txt".to_vec() }, 4));
 
+    let b = fx("7z/links.7z");
+    let r = open(&b, "links.7z").unwrap();
+    let up = r.entries().iter().find(|e| e.path == b"sub/up.txt").unwrap();
+    assert_eq!(up.kind, EntryKind::Symlink { target: b"../target.txt".to_vec() });
+    assert_eq!(up.size, 0);
+
     let b = fx("specials.tar");
     let t = TarReader::new(Cow::Borrowed(&b), ReaderLimits::default()).unwrap();
     assert_eq!(t.skipped_special(), 2);
@@ -218,6 +224,7 @@ fn hostile_mutations_never_panic() {
         "7z/tree_deflate64.7z",
         "7z/tree_ppmd.7z",
         "7z/slip.7z",
+        "7z/links.7z",
     ];
     let limits = ReaderLimits { max_total_size: 1 << 20, max_entry_size: 1 << 20, max_entries: 1000 };
     let exercise = |b: &[u8], name: &str| {

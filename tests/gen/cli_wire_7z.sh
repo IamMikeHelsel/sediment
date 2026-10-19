@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT OR Apache-2.0
-# Oracle recipe for tests/fixtures/cli_wire/7z/tree_*.7z (run on sparky).
+# Oracle recipe for tests/fixtures/cli_wire/7z/tree_*.7z and links.7z (run on sparky).
 # Oracle: the pinned 7-Zip 26.04 linux-arm64 `7zz` described in
 # tests/gen/sevenz_oracle.sh. Only used as an external CLI; no 7-Zip code is
 # part of Sediment. The input tree comes from tests/gen/cli_wire.py --stage.
@@ -31,4 +31,12 @@ for spec in \
   "$Z" t "../out/$n.7z" | grep -q "Everything is Ok"
   rm "../out/$n.log"
 done
+# Symlinks stored with -snl (Unix mode S_IFLNK in the attribute high bits,
+# the target as the entry data).
+mkdir -p "$S/links/sub" && cd "$S/links"
+printf 'tgt\n' > target.txt
+ln -s ../target.txt sub/up.txt
+touch -h -d @1709618828 target.txt sub/up.txt sub .
+"$Z" a -bd -mmt=1 -snl -m0=LZMA2 ../out/links.7z target.txt sub > /dev/null
+"$Z" t ../out/links.7z | grep -q "Everything is Ok"
 ls -la ../out
