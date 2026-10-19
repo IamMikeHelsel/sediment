@@ -10,3 +10,5 @@ pub mod zip_ranges;
 pub mod zip_index;
 pub mod archive_name;
 pub mod adler32;
+pub mod zip_payload;
+pub mod huffman;
