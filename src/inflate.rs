@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 use crate::bit_reader::BitReader;
+use crate::deflate_dynamic::{read_dynamic_trees, DynamicTrees};
 use crate::deflate_stored::read_stored_block;
 use crate::deflate_tables::{distance_spec, length_spec};
 use crate::huffman_decode::HuffmanDecoder;
@@ -29,10 +30,7 @@ pub fn inflate_raw(input: &[u8], max_output: usize, max_blocks: usize) -> Result
         let bfinal = reader.read_bits(1).map_err(|_| InflateError::UnexpectedEof)?;
         let btype = reader.read_bits(2).map_err(|_| InflateError::UnexpectedEof)?;
 
-        if btype == 2 {
-            return Err(InflateError::UnsupportedBlock);
-        }
-        if btype == 3 {
+            if btype == 3 {
             return Err(InflateError::InvalidData);
         }
 
@@ -45,24 +43,34 @@ pub fn inflate_raw(input: &[u8], max_output: usize, max_blocks: usize) -> Result
                     crate::deflate_stored::StoredError::InvalidLength => InflateError::InvalidData,
                 })?;
         } else {
-            let mut lit_lens = [8u8; 288];
-            lit_lens[144..256].fill(9);
-            lit_lens[256..280].fill(7);
-            let dist_lens = [5u8; 32];
+            let trees = if btype == 1 {
+                let mut lit_lens = [8u8; 288];
+                lit_lens[144..256].fill(9);
+                lit_lens[256..280].fill(7);
+                let dist_lens = [5u8; 32];
 
-            let lit_decoder = HuffmanDecoder::new(&lit_lens, 15)
-                .map_err(|e| match e {
-                    crate::huffman_decode::DecodeError::Allocation => InflateError::Allocation,
-                    _ => InflateError::InvalidData,
-                })?;
-            let dist_decoder = HuffmanDecoder::new(&dist_lens, 15)
-                .map_err(|e| match e {
-                    crate::huffman_decode::DecodeError::Allocation => InflateError::Allocation,
-                    _ => InflateError::InvalidData,
-                })?;
+                let lit_decoder = HuffmanDecoder::new(&lit_lens, 15)
+                    .map_err(|e| match e {
+                        crate::huffman_decode::DecodeError::Allocation => InflateError::Allocation,
+                        _ => InflateError::InvalidData,
+                    })?;
+                let dist_decoder = HuffmanDecoder::new(&dist_lens, 15)
+                    .map_err(|e| match e {
+                        crate::huffman_decode::DecodeError::Allocation => InflateError::Allocation,
+                        _ => InflateError::InvalidData,
+                    })?;
+                DynamicTrees { literal: lit_decoder, distance: Some(dist_decoder) }
+            } else {
+                read_dynamic_trees(&mut reader)
+                    .map_err(|e| match e {
+                        crate::deflate_dynamic::DynamicError::UnexpectedEof => InflateError::UnexpectedEof,
+                        crate::deflate_dynamic::DynamicError::Allocation => InflateError::Allocation,
+                        crate::deflate_dynamic::DynamicError::InvalidData => InflateError::InvalidData,
+                    })?
+            };
 
             loop {
-                let sym = lit_decoder.decode(&mut reader)
+                let sym = trees.literal.decode(&mut reader)
                     .map_err(|e| match e {
                         crate::huffman_decode::DecodeError::UnexpectedEof => InflateError::UnexpectedEof,
                         crate::huffman_decode::DecodeError::Allocation => InflateError::Allocation,
@@ -90,22 +98,26 @@ pub fn inflate_raw(input: &[u8], max_output: usize, max_blocks: usize) -> Result
                     };
                     let length = (base as usize) + (extra_bits as usize);
 
-                    let dist_sym = dist_decoder.decode(&mut reader)
-                        .map_err(|e| match e {
-                            crate::huffman_decode::DecodeError::UnexpectedEof => InflateError::UnexpectedEof,
-                            crate::huffman_decode::DecodeError::Allocation => InflateError::Allocation,
-                            _ => InflateError::InvalidData,
-                        })?;
+                    let distance = if let Some(dist_decoder) = &trees.distance {
+                        let dist_sym = dist_decoder.decode(&mut reader)
+                            .map_err(|e| match e {
+                                crate::huffman_decode::DecodeError::UnexpectedEof => InflateError::UnexpectedEof,
+                                crate::huffman_decode::DecodeError::Allocation => InflateError::Allocation,
+                                _ => InflateError::InvalidData,
+                            })?;
 
-                    let (dist_base, dist_extra) = distance_spec(dist_sym)
-                        .map_err(|_| InflateError::InvalidData)?;
-                    let dist_bits = if dist_extra > 0 {
-                        reader.read_bits(dist_extra)
-                            .map_err(|_| InflateError::UnexpectedEof)?
+                        let (dist_base, dist_extra) = distance_spec(dist_sym)
+                            .map_err(|_| InflateError::InvalidData)?;
+                        let dist_bits = if dist_extra > 0 {
+                            reader.read_bits(dist_extra)
+                                .map_err(|_| InflateError::UnexpectedEof)?
+                        } else {
+                            0
+                        };
+                        (dist_base as usize) + (dist_bits as usize)
                     } else {
-                        0
+                        return Err(InflateError::InvalidData);
                     };
-                    let distance = (dist_base as usize) + (dist_bits as usize);
 
                     append_match(&mut output, distance, length, max_output)
                         .map_err(|e| match e {

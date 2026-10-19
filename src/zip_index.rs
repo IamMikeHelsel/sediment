@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 use crate::zip::{parse_eocd, ZipError};
-use crate::zip_central::parse_central;
-use crate::zip_local::parse_local;
+use crate::zip_central::{parse_central, parse_central_supported};
+use crate::zip_local::{parse_local, parse_local_supported};
 use crate::zip_ranges::validate_ranges;
 
 #[derive(Debug, Clone, Copy)]
@@ -18,10 +18,46 @@ pub struct StoredEntry<'a> {
     pub data_offset: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZipEntry<'a> {
+    pub name: &'a [u8],
+    pub crc32: u32,
+    pub size: usize,
+    pub compressed_size: usize,
+    pub data_offset: usize,
+    pub method: u16,
+}
+
 pub fn parse_stored_entries<'a>(
     bytes: &'a [u8],
     limits: ZipLimits,
 ) -> Result<Vec<StoredEntry<'a>>, ZipError> {
+    let entries = parse_entries_impl(bytes, limits, false)?;
+    let mut result = Vec::new();
+    result.try_reserve(entries.len()).map_err(|_| ZipError::LimitExceeded)?;
+    for e in entries {
+        result.push(StoredEntry {
+            name: e.name,
+            crc32: e.crc32,
+            size: e.size,
+            data_offset: e.data_offset,
+        });
+    }
+    Ok(result)
+}
+
+pub fn parse_entries<'a>(
+    bytes: &'a [u8],
+    limits: ZipLimits,
+) -> Result<Vec<ZipEntry<'a>>, ZipError> {
+    parse_entries_impl(bytes, limits, true)
+}
+
+fn parse_entries_impl<'a>(
+    bytes: &'a [u8],
+    limits: ZipLimits,
+    allow_deflate: bool,
+) -> Result<Vec<ZipEntry<'a>>, ZipError> {
     let eocd = parse_eocd(bytes)?;
     let count = eocd.entries as usize;
 
@@ -44,7 +80,7 @@ pub fn parse_stored_entries<'a>(
     let local_end = eocd.offset;
     let local_region = &bytes[0..local_end];
 
-    let mut entries: Vec<StoredEntry<'a>> = Vec::new();
+    let mut entries: Vec<ZipEntry<'a>> = Vec::new();
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     entries.try_reserve(count).map_err(|_| ZipError::LimitExceeded)?;
     ranges.try_reserve(count).map_err(|_| ZipError::LimitExceeded)?;
@@ -53,10 +89,18 @@ pub fn parse_stored_entries<'a>(
     let mut total_size: usize = 0;
 
     for _ in 0..count {
-        let central = parse_central(dir_slice, cursor)?;
+        let central = if allow_deflate {
+            parse_central_supported(dir_slice, cursor)?
+        } else {
+            parse_central(dir_slice, cursor)?
+        };
         cursor = central.next_offset;
 
-        let local = parse_local(local_region, central.local_offset)?;
+        let local = if allow_deflate {
+            parse_local_supported(local_region, central.local_offset)?
+        } else {
+            parse_local(local_region, central.local_offset)?
+        };
 
         if central.version != local.version
             || central.flags != local.flags
@@ -69,19 +113,26 @@ pub fn parse_stored_entries<'a>(
             return Err(ZipError::Invalid);
         }
 
-        let size_usize = usize::try_from(local.size).map_err(|_| ZipError::Invalid)?;
+        if !allow_deflate && central.method == 8 {
+            return Err(ZipError::Invalid);
+        }
 
+        let size_usize = usize::try_from(local.size).map_err(|_| ZipError::Invalid)?;
+        let compressed_size_usize =
+            usize::try_from(local.compressed_size).map_err(|_| ZipError::Invalid)?;
 
         total_size = total_size.checked_add(size_usize).ok_or(ZipError::LimitExceeded)?;
         if total_size > limits.max_total_size {
             return Err(ZipError::LimitExceeded);
         }
 
-        entries.push(StoredEntry {
+        entries.push(ZipEntry {
             name: central.name,
             crc32: central.crc32,
             size: size_usize,
+            compressed_size: compressed_size_usize,
             data_offset: local.data_offset,
+            method: central.method,
         });
 
         ranges.push((central.local_offset, local.end));
