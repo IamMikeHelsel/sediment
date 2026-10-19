@@ -286,7 +286,7 @@ impl<'a> ChmArchive<'a> {
             0x200000 => 21,
             _ => return Err(ChmError::InvalidControlData),
         };
-        if reset == 0 || reset % FRAME_SIZE as u64 != 0 {
+        if reset == 0 || !reset.is_multiple_of(FRAME_SIZE as u64) {
             return Err(ChmError::InvalidControlData);
         }
         let reset_interval_frames = u32::try_from(reset / FRAME_SIZE as u64).map_err(|_| ChmError::InvalidControlData)?;

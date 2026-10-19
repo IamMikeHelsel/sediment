@@ -189,10 +189,8 @@ fn truncation_never_panics() {
             if let Ok(cab) = CabArchive::parse(&bytes[..cut], lim()) {
                 // whatever extracts must equal the untruncated result
                 for (i, r) in cab.extract_all().into_iter().enumerate() {
-                    if let Ok(d) = r {
-                        if let Some(Ok(f)) = full.get(i) {
-                            assert_eq!(&d, f, "{name} cut {cut} file {i}");
-                        }
+                    if let (Ok(d), Some(Ok(f))) = (r, full.get(i)) {
+                        assert_eq!(&d, f, "{name} cut {cut} file {i}");
                     }
                 }
             }

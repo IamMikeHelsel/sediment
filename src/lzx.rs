@@ -488,7 +488,7 @@ pub fn lzx_decompress(
     let mut frame_index: u64 = 0;
 
     while out.len() < output_len {
-        if reset_interval_frames != 0 && frame_index != 0 && frame_index % u64::from(reset_interval_frames) == 0 {
+        if reset_interval_frames != 0 && frame_index != 0 && frame_index.is_multiple_of(u64::from(reset_interval_frames)) {
             if out.len() != frame_start {
                 return Err(LzxError::InvalidReset);
             }

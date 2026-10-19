@@ -118,9 +118,8 @@ fn wrong_window_is_error_or_different() {
     // trees no longer line up. It must fail cleanly (or at least not match).
     let comp = fixture("cab", "raw16.lzx");
     let want = fixture("cab", "raw16.out");
-    match lzx_decompress(&comp, 15, want.len(), 0) {
-        Ok(d) => assert!(d != want),
-        Err(_) => {}
+    if let Ok(d) = lzx_decompress(&comp, 15, want.len(), 0) {
+        assert!(d != want);
     }
 }
 

@@ -325,7 +325,7 @@ impl<'a> CfbArchive<'a> {
                 let name = if typ == 0 || name_len == 0 {
                     Vec::new()
                 } else {
-                    if name_len > 64 || name_len % 2 != 0 {
+                    if name_len > 64 || !name_len.is_multiple_of(2) {
                         return Err(CfbError::InvalidDirectory);
                     }
                     let units = name_len / 2 - 1;
