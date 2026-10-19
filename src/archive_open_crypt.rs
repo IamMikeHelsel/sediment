@@ -21,7 +21,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::archive_detect::{ArchiveFormat as Detected, detect_format};
-use crate::archive_open::{SevenZCodecs, open_named};
+use crate::archive_open::SevenZCodecs;
 use crate::archive_reader::{ArchiveFormat, ArchiveReader, ReaderError, ReaderLimits};
 use crate::extract_plan::{EntryKind, PlannedEntry};
 use crate::sevenz_aes_coder::{SEVENZ_AES_METHOD_ID, SevenZAesCoderError, SevenZCryptoDecoder};
@@ -127,7 +127,7 @@ pub fn open_named_with_password<'a>(
         }
         _ => {}
     }
-    let reader = open_named(bytes, archive_name, limits)?;
+    let reader = crate::archive_open_ext::open_named_ext(bytes, archive_name, limits)?;
     Ok(OpenedArchive { reader, status })
 }
 

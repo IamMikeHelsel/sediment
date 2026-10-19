@@ -12,7 +12,8 @@
 //!   list|test ARCHIVE         original ZIP-only commands (frozen output)
 //! Readable formats for l/t/x/e: zip, tar, gzip/bzip2/xz single streams,
 //!   tar.gz/tgz, tar.bz2/tbz2/tbz, tar.xz/txz, 7z, cpio, ar, deb, rpm and
-//!   xar (see `archive_open`).
+//!   xar (see `archive_open`), zstd single streams, tar.zst/tzst and WIM
+//!   (see `archive_open_ext`).
 //! Switches for x/e: -o<dir> output directory, -y assume yes (overwrite),
 //!   -aoa overwrite all, -aos skip existing, -aou auto-rename new files,
 //!   -snl create symbolic links (default: skip them with a warning),
@@ -35,12 +36,15 @@ use std::process;
 use sediment_engine::archive_name::escape_name;
 use sediment_engine::archive_detect::{ArchiveFormat as Detected, detect_format};
 use sediment_engine::archive_open_crypt::{OpenCryptError, OpenedArchive, PasswordProblem, open_named_with_password};
+use sediment_engine::archive_open_ext::open_stdin_ext;
+use sediment_engine::wim_read::is_wim;
+use sediment_engine::zstd_decode::is_zstd;
 use sediment_engine::archive_reader::{ArchiveReader, ReaderError, ReaderLimits};
 use sediment_engine::cli_add::run_add;
 use sediment_engine::cli_bench::run_bench;
 use sediment_engine::cli_hash::run_hash;
 use sediment_engine::cli_stdio::{
-    STDIN_LIMIT_ENV, StdioError, open_stdin_bytes, read_limited, run_add_stdio, stdin_limit, wants_stdio, write_files,
+    STDIN_LIMIT_ENV, StdioError, read_limited, run_add_stdio, stdin_limit, wants_stdio, write_files,
 };
 use sediment_engine::volume_io::{VolumeError, first_volume_base, read_volumes};
 use sediment_engine::cli_crypt::{CryptSwitches, add_needs_crypt, run_add_crypt, take_crypt_switches};
@@ -322,11 +326,13 @@ fn load_archive(path: Option<&OsStr>) -> (Vec<u8>, Vec<u8>) {
 }
 
 fn open_input<'a>(buf: &'a [u8], name: &[u8], stdin: bool, sw: &CryptSwitches) -> OpenedArchive<'a> {
-    // Single-stream compressed data on stdin (gzip/bzip2/xz) is never
-    // encrypted; it goes through `cli_stdio` for member-name recovery.
-    let single = matches!(detect_format(buf), Detected::Gzip | Detected::Bzip2 | Detected::Xz);
+    // Single-stream compressed data on stdin (gzip/bzip2/xz/zstd) and WIM
+    // images are never encrypted; it goes through `cli_stdio` for member-name recovery.
+    let single = matches!(detect_format(buf), Detected::Gzip | Detected::Bzip2 | Detected::Xz)
+        || is_zstd(buf)
+        || is_wim(buf);
     let r = if stdin && single {
-        open_stdin_bytes(buf, ReaderLimits::default()).map(OpenedArchive::plain).map_err(OpenCryptError::Reader)
+        open_stdin_ext(buf, ReaderLimits::default()).map(OpenedArchive::plain).map_err(OpenCryptError::Reader)
     } else {
         open_named_with_password(buf, name, ReaderLimits::default(), sw.password.as_deref())
     };
