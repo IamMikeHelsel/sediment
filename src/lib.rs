@@ -62,3 +62,4 @@ pub mod ar_read;
 pub mod listfile;
 pub mod size_parse;
 pub mod vhd_footer;
+pub mod ihex_decode;
