@@ -79,3 +79,7 @@ pub mod lzma2_encode;
 pub mod xz_encode;
 pub mod archive_open;
 pub mod single_compress;
+pub mod wildcard;
+pub mod ar_read;
+pub mod listfile;
+pub mod size_parse;
