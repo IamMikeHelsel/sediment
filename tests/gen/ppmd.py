@@ -8,8 +8,11 @@ stdlib plus that external binary:
   python3 tests/gen/ppmd.py --7zz /path/to/7zz --out tests/fixtures/ppmd
 
 It must be run inside a fresh scratch directory (it creates archives there).
-Inputs are produced by a deterministic generator that tests/ppmd_common
-re-implements in Rust, so only the packed streams are committed.
+Inputs are produced by a deterministic generator that
+re-implements in Rust (tests/ppmd_support/mod.rs), so only the packed
+streams are committed. Oracle used: 7-Zip (7zz) 26.04 arm64, sha256 in the
+manifest. Note 7-Zip shrinks the PPMd memory size for small inputs, so the
+manifest records the memory size actually stored in each archive.
 
 For each case it builds a 7z (-m0=PPMd) or zip (-mm=PPMd) archive holding one
 file, then cuts out the raw packed stream:

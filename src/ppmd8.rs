@@ -138,10 +138,8 @@ fn decode_inner(
         return Err(Ppmd8Error::LimitExceeded);
     }
     let mut out = Vec::new();
-    let reserve = match exact {
-        Some(n) => n,
-        None => max_output.min(1 << 20),
-    };
+    // Reserve lazily: a claimed size is not trusted for one huge allocation.
+    let reserve = exact.unwrap_or(max_output).min(1 << 22);
     out.try_reserve(reserve).map_err(|_| Ppmd8Error::Allocation)?;
     let mut model = Model::new(props)?;
     let mut rc = RangeDecoder::new(input);
@@ -169,6 +167,9 @@ fn decode_inner(
         }
         if out.len() >= max_output {
             return Err(Ppmd8Error::LimitExceeded);
+        }
+        if out.len() == out.capacity() {
+            out.try_reserve(out.len()).map_err(|_| Ppmd8Error::Allocation)?;
         }
         out.push(sym as u8);
     }
@@ -867,7 +868,7 @@ impl Model {
             if i == N_INDEXES {
                 let num_bytes = self.i2u(indx) * UNIT_SIZE;
                 self.glue_count = self.glue_count.wrapping_sub(1);
-                return if self.units_start - self.text > num_bytes {
+                return if self.units_start.saturating_sub(self.text) > num_bytes {
                     self.units_start -= num_bytes;
                     self.units_start
                 } else {
@@ -1287,10 +1288,10 @@ impl Model {
                 .summ_freq(c)
                 .wrapping_sub(self.num_stats(c))
                 .wrapping_sub(cf);
-            1 + if 2 * cf <= s0 {
-                (5 * cf > s0) as u32
+            1 + if cf.wrapping_mul(2) <= s0 {
+                (cf.wrapping_mul(5) > s0) as u32
             } else {
-                match (cf + 2 * s0).wrapping_sub(3).checked_div(s0) {
+                match cf.wrapping_add(s0.wrapping_mul(2)).wrapping_sub(3).checked_div(s0) {
                     Some(v) => v,
                     None => {
                         self.bad();
@@ -1501,11 +1502,12 @@ impl Model {
             let sfc = self.summ_freq(c);
             let mut cf = 2 * ffreq * (sfc + 6);
             let sf = s0.wrapping_add(sfc);
-            if cf < 6 * sf {
-                cf = 1 + (cf > sf) as u32 + (cf >= 4 * sf) as u32;
+            let m = |k: u32| sf.wrapping_mul(k);
+            if cf < m(6) {
+                cf = 1 + (cf > sf) as u32 + (cf >= m(4)) as u32;
                 self.set_summ_freq(c, sfc + 4);
             } else {
-                cf = 4 + (cf > 9 * sf) as u32 + (cf > 12 * sf) as u32 + (cf > 15 * sf) as u32;
+                cf = 4 + (cf > m(9)) as u32 + (cf > m(12)) as u32 + (cf > m(15)) as u32;
                 self.set_summ_freq(c, sfc + cf);
             }
             let p = self.stats(c) + (ns1 + 1) * 6;
@@ -1619,7 +1621,7 @@ impl Model {
             }
             self.set_flags(mc, fl);
         }
-        self.set_summ_freq(mc, sum_freq + esc_freq - (esc_freq >> 1));
+        self.set_summ_freq(mc, sum_freq.wrapping_add(esc_freq - (esc_freq >> 1)));
         self.set_flags(mc, self.flags(mc) | 0x04);
         self.found_state = self.stats(mc);
     }
@@ -1655,7 +1657,7 @@ impl Model {
         let mc = self.min_context;
         let fs = self.found_state;
         self.prev_success = (2 * self.freq(fs) >= self.summ_freq(mc)) as u32;
-        self.run_length += self.prev_success as i32;
+        self.run_length = self.run_length.wrapping_add(self.prev_success as i32);
         self.set_summ_freq(mc, self.summ_freq(mc) + 4);
         let f = self.freq(fs) + 4;
         self.set_freq(fs, f);
@@ -1670,7 +1672,7 @@ impl Model {
         let f = self.freq(fs);
         self.set_freq(fs, f + (f < 196) as u32);
         self.prev_success = 1;
-        self.run_length += 1;
+        self.run_length = self.run_length.wrapping_add(1);
         self.next_context();
     }
 
