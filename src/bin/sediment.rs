@@ -4,8 +4,8 @@ use std::path::Path;
 use std::process;
 
 use sediment_engine::archive_name::escape_name;
-use sediment_engine::zip_index::{parse_stored_entries, ZipLimits};
-use sediment_engine::zip_payload::stored_data;
+use sediment_engine::zip_index::{parse_entries, ZipLimits};
+use sediment_engine::zip_decode::entry_data;
 
 fn err(msg: &'static str, code: i32) -> ! {
     let _ = writeln!(io::stderr().lock(), "sediment: {msg}");
@@ -74,7 +74,7 @@ fn main() {
         err("file too large", 1);
     }
     let limits = ZipLimits { max_entries: 10000, max_total_size: 64 * 1024 * 1024 };
-    let entries = match parse_stored_entries(&buf, limits) {
+    let entries = match parse_entries(&buf, limits) {
         Ok(e) => e,
         Err(_) => err("parse error", 1),
     };
@@ -93,12 +93,15 @@ fn main() {
             }
         }
     } else {
-        let mut total: u64 = 0;
         let count = entries.len();
+        let per_entry_blocks = if count > 0 { 100000 / count } else { 100000 };
+        let mut total: u64 = 0;
         for e in &entries {
-            if stored_data(&buf, e).is_err() {
-                err("payload error", 1);
-            }
+            let data = match entry_data(&buf, e, e.size, per_entry_blocks) {
+                Ok(d) => d,
+                Err(_) => err("payload error", 1),
+            };
+            drop(data);
             total = match total.checked_add(e.size as u64) {
                 Some(v) => v,
                 None => err("overflow", 1),
