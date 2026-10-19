@@ -1,0 +1,46 @@
+
+7-Zip (z) 26.04 (arm64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-10-05
+ 64-bit arm_v:8-A locale=C.UTF-8 Threads:20 OPEN_MAX:32768, ASM
+
+Scanning the drive for archives:
+1 file, 1043 bytes (2 KiB)
+
+Listing archive: nonsolid_no_substreams.7z
+
+--
+Path = nonsolid_no_substreams.7z
+Type = 7z
+Physical Size = 1043
+Headers Size = 182
+Method = Copy
+Solid = -
+Blocks = 3
+
+----------
+Path = one.txt
+Size = 11
+Packed Size = 11
+Modified = 2023-11-14 22:13:20.1234567
+Attributes = A -rw-r--r--
+Encrypted = -
+Method = Copy
+Block = 0
+
+Path = two.txt
+Size = 550
+Packed Size = 550
+Modified = 2023-11-14 22:13:20.1234567
+Attributes = A -rw-r--r--
+Encrypted = -
+Method = Copy
+Block = 1
+
+Path = three.bin
+Size = 300
+Packed Size = 300
+Modified = 2023-11-14 22:13:20.1234567
+Attributes = A -rw-r--r--
+Encrypted = -
+Method = Copy
+Block = 2
+

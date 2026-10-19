@@ -1,0 +1,107 @@
+
+7-Zip (z) 26.04 (arm64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-10-05
+ 64-bit arm_v:8-A locale=C.UTF-8 Threads:20 OPEN_MAX:32768, ASM
+
+Scanning the drive for archives:
+1 file, 1281 bytes (2 KiB)
+
+Listing archive: solid.7z
+
+--
+Path = solid.7z
+Type = 7z
+Physical Size = 1281
+Headers Size = 389
+Method = Copy
+Solid = +
+Blocks = 2
+
+----------
+Path = dir
+Size = 0
+Packed Size = 0
+Modified = 2020-09-13 12:26:40.0000000
+Created = 
+Attributes = D drwxr-xr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = dir/sub
+Size = 0
+Packed Size = 0
+Modified = 2020-09-13 12:26:40.0000000
+Created = 
+Attributes = D drwx------
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = empty.txt
+Size = 0
+Packed Size = 0
+Modified = 2020-09-13 12:26:40.0000000
+Created = 2020-09-13 12:26:40.0000000
+Attributes = A -rw-r--r--
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = a.txt
+Size = 550
+Packed Size = 874
+Modified = 2023-11-14 22:13:20.1234567
+Created = 2020-09-13 12:26:40.0000000
+Attributes = A -rw-r--r--
+CRC = 36BCA164
+Encrypted = -
+Method = Copy
+Block = 0
+
+Path = b.bin
+Size = 300
+Packed Size = 
+Modified = 2023-11-14 22:13:20.1234567
+Created = 
+Attributes = 
+CRC = 226C6629
+Encrypted = -
+Method = Copy
+Block = 0
+
+Path = dir/héllo_日本.txt
+Size = 13
+Packed Size = 
+Modified = 2023-11-14 22:13:20.1234567
+Created = 
+Attributes = A -rw-------
+CRC = 6C14D048
+Encrypted = -
+Method = Copy
+Block = 0
+
+Path = 😀.txt
+Size = 11
+Packed Size = 
+Modified = 2023-11-14 22:13:20.1234567
+Created = 2020-09-13 12:26:40.0000000
+Attributes = A -rw-r--r--
+CRC = 2C876926
+Encrypted = -
+Method = Copy
+Block = 0
+
+Path = d.txt
+Size = 18
+Packed Size = 18
+Modified = 2020-09-13 12:26:40.0000000
+Created = 2020-09-13 12:26:40.0000000
+Attributes = A -r--r--r--
+CRC = A9633952
+Encrypted = -
+Method = Copy
+Block = 1
+

@@ -1,0 +1,29 @@
+
+7-Zip (z) 26.04 (arm64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-10-05
+ 64-bit arm_v:8-A locale=C.UTF-8 Threads:20 OPEN_MAX:32768, ASM
+
+Scanning the drive for archives:
+1 file, 119 bytes (1 KiB)
+
+Listing archive: single.7z
+
+--
+Path = single.7z
+Type = 7z
+Physical Size = 119
+Headers Size = 108
+Method = Copy
+Solid = -
+Blocks = 1
+
+----------
+Path = hello.txt
+Size = 11
+Packed Size = 11
+Modified = 2023-11-14 22:13:20.1234567
+Attributes = A -rw-r-----
+CRC = 99504610
+Encrypted = -
+Method = Copy
+Block = 0
+
