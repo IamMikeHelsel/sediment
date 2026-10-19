@@ -10,6 +10,8 @@
 //!   list|test ARCHIVE         original ZIP-only commands (frozen output)
 //! Readable formats for l/t/x/e: zip, tar, gzip/bzip2/xz single streams,
 //!   tar.gz/tgz, tar.bz2/tbz2/tbz, tar.xz/txz and 7z (see `archive_open`).
+//! Streams and volumes: -si / -so, `*.001` split archives and `a -v<size>`
+//!   (see `cli_run` and `cli_stdio`).
 //! Exit codes for l/t/x/e/a (7-Zip): 0 ok, 1 warning, 2 fatal error,
 //!   7 command line error, 8 out of memory, 255 stopped by the user.
 //!   `list`/`test`/`--help` keep their frozen codes (1 failure, 2 usage),
@@ -57,13 +59,17 @@ fn main() {
     } else if let Some(command) = Command::from_name(&cmd) {
         let stdin = io::stdin();
         let interactive = stdin.is_terminal();
-        let mut input = stdin.lock();
+        let stdout_is_terminal = io::stdout().is_terminal();
+        // Unlocked: `a -si` hands standard input to `cli_stdio`, which locks it itself.
+        let mut input = io::BufReader::new(stdin);
         let mut stdout = io::stdout().lock();
         let mut stderr = io::stderr().lock();
         let mut con = Console {
             stdout: &mut stdout,
             stderr: &mut stderr,
-            input: if interactive { Some(&mut input) } else { None },
+            stdin: Some(&mut input),
+            interactive,
+            stdout_is_terminal,
         };
         let code = run_args(command, &rest, &mut con);
         process::exit(code);

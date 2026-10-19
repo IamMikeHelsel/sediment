@@ -54,7 +54,7 @@ fn commands_by_letter() {
 #[test]
 fn defaults() {
     let cl = ok(Command::List, &["a.zip"]);
-    assert_eq!(cl.archive, PathBuf::from("a.zip"));
+    assert_eq!(cl.archive, Some(PathBuf::from("a.zip")));
     assert!(cl.names.is_empty() && cl.includes.is_empty() && cl.excludes.is_empty());
     assert_eq!(cl.recurse, None);
     assert_eq!(cl.archive_type, None);
@@ -130,7 +130,7 @@ fn switch_table() {
     for (a, check) in table {
         let cl = ok(Command::Extract, a);
         assert!(check(&cl), "{a:?} -> {cl:?}");
-        assert_eq!(cl.archive, PathBuf::from("a"), "{a:?}");
+        assert_eq!(cl.archive, Some(PathBuf::from("a")), "{a:?}");
     }
 }
 
@@ -167,7 +167,7 @@ fn include_exclude_rules() {
 #[test]
 fn positional_names_and_listfiles() {
     let cl = ok(Command::Add, &["out.zip", "dir", "@list.txt", "@", "*.c"]);
-    assert_eq!(cl.archive, PathBuf::from("out.zip"));
+    assert_eq!(cl.archive, Some(PathBuf::from("out.zip")));
     assert_eq!(cl.names, vec![wild("dir"), NameItem::ListFile("list.txt".into()), wild("@"), wild("*.c")]);
 }
 
@@ -175,12 +175,12 @@ fn positional_names_and_listfiles() {
 fn end_of_switches() {
     let cl = ok(Command::Extract, &["-y", "--", "-a.zip", "-r", "--"]);
     assert!(cl.yes);
-    assert_eq!(cl.archive, PathBuf::from("-a.zip"));
+    assert_eq!(cl.archive, Some(PathBuf::from("-a.zip")));
     assert_eq!(cl.names, vec![wild("-r"), wild("--")]);
     assert_eq!(cl.recurse, None);
     // a lone "-" is a name, not a switch
     let cl = ok(Command::List, &["-"]);
-    assert_eq!(cl.archive, PathBuf::from("-"));
+    assert_eq!(cl.archive, Some(PathBuf::from("-")));
 }
 
 /// Every malformed command line is an error (exit code 7), never a panic.
@@ -228,7 +228,15 @@ fn command_line_errors() {
         &["-mx", "a.zip"],
         &["-mx=", "a.zip"],
         &["-mx10", "a.zip"],
-        &["-m0=lzma", "a.zip"],
+        &["-m", "a.zip"],
+        &["-v", "a.zip"],
+        &["-v0", "a.zip"],
+        &["-vx", "a.zip"],
+        &["-so", "-v1k", "a.zip"],
+        &["-an", "a.zip"],
+        &["-sox", "a.zip"],
+        &["-anx", "-so"],
+        &["-si", "-si", "a.zip"],
         &["-yy", "a.zip"],
         &["-lx", "a.zip"],
         &["-s", "a.zip"],
@@ -273,7 +281,7 @@ fn non_utf8_values_survive() {
     ];
     let cl = parse_command_line(Command::Extract, &argv).unwrap();
     assert_eq!(cl.output_dir.unwrap().as_os_str().as_bytes(), b"\xffdir");
-    assert_eq!(cl.archive.as_os_str().as_bytes(), b"\xfe.zip");
+    assert_eq!(cl.archive.unwrap().as_os_str().as_bytes(), b"\xfe.zip");
     assert_eq!(cl.includes[0].item, NameItem::Wildcard(OsStr::from_bytes(b"\xfd*").to_os_string()));
 }
 
@@ -366,7 +374,7 @@ fn add_targets() {
         ("x.gz", None, Ok(AddTarget::Stream(Compression::Gzip))),
         ("x.bz2", None, Ok(AddTarget::Stream(Compression::Bzip2))),
         ("x.xz", None, Ok(AddTarget::Stream(Compression::Xz))),
-        ("x.7z", None, Err(AddTargetError::SevenZUnsupported)),
+        ("x.7z", None, Ok(AddTarget::SevenZ)),
         ("x.bin", None, Err(AddTargetError::UnknownName)),
         (".zip", None, Err(AddTargetError::UnknownName)),
         ("x.bin", Some(ArchiveType::Zip), Ok(AddTarget::Zip)),
@@ -374,7 +382,7 @@ fn add_targets() {
         ("x", Some(ArchiveType::Gzip), Ok(AddTarget::Stream(Compression::Gzip))),
         ("x", Some(ArchiveType::Bzip2), Ok(AddTarget::Stream(Compression::Bzip2))),
         ("x", Some(ArchiveType::Xz), Ok(AddTarget::Stream(Compression::Xz))),
-        ("x.zip", Some(ArchiveType::SevenZ), Err(AddTargetError::SevenZUnsupported)),
+        ("x.zip", Some(ArchiveType::SevenZ), Ok(AddTarget::SevenZ)),
     ];
     for (name, t, want) in table {
         assert_eq!(add_target(name.as_ref(), *t), *want, "{name} {t:?}");
@@ -398,4 +406,27 @@ fn slt_helpers() {
     assert_eq!(slt_path(b"\xff"), "\\xff");
     assert_eq!(slt_path(b"/"), "/");
     assert_eq!(slt_path(b""), "");
+}
+
+#[test]
+fn stream_volume_and_method_switches() {
+    // -si while reading: no archive name, every positional is a name.
+    let cl = ok(Command::Extract, &["-si", "a.txt", "b/*"]);
+    assert_eq!(cl.stdin, Some(OsString::new()));
+    assert_eq!(cl.archive, None);
+    assert_eq!(cl.names, vec![wild("a.txt"), wild("b/*")]);
+    let cl = ok(Command::List, &["-SI"]);
+    assert_eq!((cl.stdin.is_some(), cl.archive.is_none(), cl.names.len()), (true, true, 0));
+    // -si for a carries the member name; the archive stays positional.
+    let cl = ok(Command::Add, &["-sinotes.txt", "out.tar"]);
+    assert_eq!((cl.stdin, cl.archive), (Some(OsString::from("notes.txt")), Some(PathBuf::from("out.tar"))));
+    let cl = ok(Command::Add, &["-so", "-an", "-tgzip"]);
+    assert!(cl.to_stdout && cl.no_archive_name && cl.archive.is_none());
+    let cl = ok(Command::Add, &["-v1k", "-v2M", "-v100b", "-v7", "o.tar"]);
+    assert_eq!(cl.volumes, vec![1024, 2 << 20, 100, 7]);
+    let cl = ok(Command::Add, &["-m0=LZMA", "-mf=BCJ", "-ms=off", "-mhc=on", "-mmt=2", "-mx=3", "o.7z"]);
+    assert_eq!(cl.methods, args(&["-m0=LZMA", "-mf=BCJ", "-ms=off", "-mhc=on", "-mmt=2"]));
+    assert_eq!(cl.level, Some(3));
+    let cl = ok(Command::Extract, &["-so", "a.zip"]);
+    assert!(cl.to_stdout && cl.archive == Some(PathBuf::from("a.zip")));
 }

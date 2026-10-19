@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 """Oracle for Sediment archive *creation* (zip_create / tar_create / compress_wrap).
 
-Python stdlib only (zipfile, tarfile, gzip, zlib).
+Python stdlib only (zipfile, tarfile, gzip, bz2, lzma, zlib).
 
   python3 tests/gen/create.py spec            # write tests/fixtures/create/spec.tsv
   SEDIMENT_REGEN=1 cargo test --test create_fixtures   # Rust writes the archives
@@ -13,9 +13,14 @@ kind is F (file, payload = data), D (directory), L (symlink, payload = target).
 Entries are listed in Sediment's canonical order (component-wise byte sort).
 
 `check` also accepts a directory of archives produced by `sediment a` from the
-same tree (used by the Rust tests): every *.zip, *.tar, *.tar.gz, *.tgz in DIR is
-verified against DIR/spec.tsv.
+same tree (used by the Rust tests): every *.zip, *.tar, *.tar.gz, *.tgz,
+*.tar.xz, *.txz, *.tar.bz2, *.tbz2, *.tbz in DIR is verified against
+DIR/spec.tsv. Any other *.gz, *.xz or *.bz2 file is a single-file stream whose
+name minus the extension is the base name of a spec file entry; it must
+decompress to that entry's payload (single stream, stdlib decoder).
 """
+import bz2
+import lzma
 import datetime
 import gzip
 import io
@@ -23,6 +28,7 @@ import os
 import sys
 import tarfile
 import zipfile
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIX = os.path.normpath(os.path.join(HERE, "..", "fixtures", "create"))
@@ -170,11 +176,57 @@ def check_tar(path, spec):
                 if not m.isfile() or t.extractfile(m).read() != payload:
                     fail(f"{path}: {name}: data mismatch")
     with open(path, "rb") as f:
-        raw = f.read()
-    if path.endswith((".gz", ".tgz")):
-        raw = gzip.decompress(raw)
+        raw = decompress_any(path, f.read())
     if len(raw) % 10240 != 0:
         fail(f"{path}: not padded to a 10240-byte record")
+
+
+GZ_EXT = (".tar.gz", ".tgz")
+XZ_EXT = (".tar.xz", ".txz")
+BZ_EXT = (".tar.bz2", ".tbz2", ".tbz")
+TAR_EXT = (".tar",) + GZ_EXT + XZ_EXT + BZ_EXT
+
+
+def decompress_any(path, raw):
+    """Decompress by extension, insisting on exactly one stream/member."""
+    if path.endswith(GZ_EXT + (".gz",)):
+        d = zlib.decompressobj(16 + 15)
+        out = d.decompress(raw) + d.flush()
+        if not d.eof or d.unused_data:
+            fail(f"{path}: not exactly one gzip member")
+        if raw[4:8] != b"\0\0\0\0":
+            fail(f"{path}: gzip MTIME should be 0")
+        return out
+    if path.endswith(XZ_EXT + (".xz",)):
+        d = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+        out = d.decompress(raw)
+        if not d.eof or d.unused_data:
+            fail(f"{path}: not exactly one xz stream")
+        if d.check != lzma.CHECK_CRC64:
+            fail(f"{path}: expected CRC64 check, got {d.check}")
+        return out
+    if path.endswith(BZ_EXT + (".bz2",)):
+        d = bz2.BZ2Decompressor()
+        out = d.decompress(raw)
+        if not d.eof or d.unused_data:
+            fail(f"{path}: not exactly one bzip2 stream")
+        return out
+    return raw
+
+
+def check_single(path, spec):
+    base = os.path.basename(path).rsplit(".", 1)[0]
+    want = [e for e in spec if e[0] == "F" and e[3].rsplit("/", 1)[-1] == base]
+    if len(want) != 1:
+        fail(f"{path}: no unique spec file named {base!r}")
+    with open(path, "rb") as f:
+        raw = f.read()
+    if decompress_any(path, raw) != want[0][4]:
+        fail(f"{path}: payload mismatch")
+    # The module-level helpers must agree with the streaming decoders.
+    mod = gzip if path.endswith(".gz") else lzma if path.endswith(".xz") else bz2
+    if mod.decompress(raw) != want[0][4]:
+        fail(f"{path}: {mod.__name__}.decompress mismatch")
 
 
 def check_dir(d):
@@ -184,23 +236,25 @@ def check_dir(d):
         p = os.path.join(d, fn)
         if fn.endswith(".zip"):
             check_zip(p, spec, expect_store="store" in fn)
-        elif fn.endswith((".tar", ".tar.gz", ".tgz")):
+        elif fn.endswith(TAR_EXT):
             check_tar(p, spec)
+        elif fn.endswith((".gz", ".xz", ".bz2")):
+            check_single(p, spec)
         else:
             continue
         checked += 1
         print(f"ok {fn}")
     if checked == 0:
         fail(f"no archives in {d}")
-    # Cross-check: gzip members decompress to the plain tar fixture.
+    # Cross-check: compressed tars decompress to the plain tar fixture.
     plain = os.path.join(d, "create.tar")
     if os.path.exists(plain):
         with open(plain, "rb") as f:
             tar_bytes = f.read()
         for fn in sorted(os.listdir(d)):
-            if fn.endswith((".tar.gz", ".tgz")):
+            if fn.endswith(GZ_EXT + XZ_EXT + BZ_EXT):
                 with open(os.path.join(d, fn), "rb") as f:
-                    if gzip.decompress(f.read()) != tar_bytes:
+                    if decompress_any(fn, f.read()) != tar_bytes:
                         fail(f"{fn}: does not decompress to create.tar")
     print(f"checked {checked} archives")
 

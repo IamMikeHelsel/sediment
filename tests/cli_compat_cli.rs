@@ -139,7 +139,13 @@ fn exit_codes() {
         (argv!["l", "-t7z", &zip], 2),
         (argv!["t", root().join("tests/fixtures/extract/badcrc.zip")], 2),
         (argv!["x", root().join("tests/fixtures/extract/notzip.bin"), os(format!("-o{}", t.path("n").display()))], 2),
-        (argv!["a", t.path("x.7z"), &zip], 2),
+        (argv!["a", t.path("x.7z"), "-m0=bogus", &zip], 7),
+        (argv!["a", t.path("x.zip"), "-m0=lzma", &zip], 7),
+        (argv!["a", t.path("v.zip"), "-so", "-v1k", &zip], 7),
+        (argv!["a", t.path("v.zip"), "-v0", &zip], 7),
+        (argv!["a", "-an", t.path("v.zip"), &zip], 7),
+        (argv!["a", t.0.as_path(), "-tzip", &zip], 2),
+        (argv!["a", t.path("none.zip")], 7),
         // success
         (argv!["l", &zip], 0),
         (argv!["l", "-ba", "-slt", &zip], 0),
@@ -432,7 +438,9 @@ fn console_run(cmd: Command, a: &[OsString], input: Option<&str>) -> (i32, Strin
         let mut con = Console {
             stdout: &mut out,
             stderr: &mut err,
-            input: cursor.as_mut().map(|c| c as &mut dyn std::io::BufRead),
+            interactive: cursor.is_some(),
+            stdout_is_terminal: false,
+            stdin: cursor.as_mut().map(|c| c as &mut dyn std::io::BufRead),
         };
         run_args(cmd, a, &mut con)
     };
@@ -598,7 +606,7 @@ fn add_wildcards_and_filters() {
         (argv![os(format!("@{}", lst.display()))], vec!["hello.txt", "caf\\xc3\\xa9.txt", "prog.bin", "random.bin"]),
         (argv!["-ssc-", "HELLO.*"], vec!["hello.txt"]),
         (
-            argv![],
+            argv!["*"],
             vec![
                 "data", "data/prog.bin", "data/random.bin", "data/words.txt", "docs", CAFE, "docs/deep", "docs/deep/nested",
                 "docs/deep/nested/leaf.txt", LONG, "docs/readme.md", "empty.txt", "emptydir", "hello.txt",
@@ -606,7 +614,7 @@ fn add_wildcards_and_filters() {
         ),
     ];
     for (i, (sel, want)) in table.iter().enumerate() {
-        for ext in ["zip", "tar", "tar.gz", "tar.xz", "tar.bz2"] {
+        for ext in ["zip", "tar", "tar.gz", "tar.xz", "tar.bz2", "7z"] {
             let arc = t.path(&format!("out{i}.{ext}"));
             let mut a = argv!["a", &arc];
             a.extend(sel.iter().cloned());
@@ -622,7 +630,7 @@ fn add_wildcards_and_filters() {
 #[test]
 fn add_round_trip_through_extract() {
     let t = scratch("rt");
-    for ext in ["zip", "tar.xz", "tar.bz2", "tgz"] {
+    for ext in ["zip", "tar.xz", "tar.bz2", "tgz", "7z"] {
         let arc = t.path(&format!("all.{ext}"));
         let o = run_in(Some(&t.path("src")), &argv!["a", "-mx9", &arc, "-r", "*"]);
         assert_eq!(code(&o), 0, "{ext}: {}", text(&o.stderr));
@@ -694,7 +702,7 @@ fn add_delete_after() {
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     assert_eq!(keys(&snapshot(&src.join("docs"))), strs(&["readme.md"]));
     // Nothing is deleted when the archive cannot be written.
-    let o = run_in(Some(&src), &argv!["a", "-sdel", t.path("x.7z"), "hello.txt"]);
+    let o = run_in(Some(&src), &argv!["a", "-sdel", "-tzip", t.0.as_path(), "hello.txt"]);
     assert_eq!(code(&o), 2);
     assert!(src.join("hello.txt").exists());
 }
@@ -720,6 +728,37 @@ fn add_missing_inputs_and_existing_archive() {
     let o = run_in(Some(&src), &argv!["a", &none, "-x!*", "hello.txt"]);
     assert_eq!(code(&o), 1);
     assert!(!none.exists());
+}
+
+#[test]
+fn add_sevenz_with_method_switches() {
+    let t = scratch("7z");
+    let src = t.path("src");
+    for (i, sw) in [&["-m0=LZMA", "-ms=off"][..], &["-mx0"], &["-m0=LZMA2", "-mf=BCJ", "-mhc=off"], &["-t7z"]].iter().enumerate() {
+        let arc = t.path(&format!("m{i}.7z"));
+        let mut a = argv!["a", &arc, "-r", "*"];
+        a.extend(sw.iter().map(os));
+        let o = run_in(Some(&src), &a);
+        assert_eq!(code(&o), 0, "{sw:?}: {}", text(&o.stderr));
+        let slt = text(&run(&argv!["l", "-slt", &arc]).stdout);
+        let want = match i {
+            0 => "\nMethod = LZMA:",
+            1 => "\nMethod = Copy\n",
+            2 => " LZMA2:",
+            _ => "\nType = 7z\n",
+        };
+        assert!(slt.contains(want), "{sw:?}: {slt}");
+        if i == 0 {
+            assert!(slt.contains("\nSolid = -\n"), "{slt}");
+        }
+        if i == 2 {
+            assert!(slt.contains("\nMethod = BCJ LZMA2:"), "{slt}");
+        }
+        let out = t.path(&format!("x{i}"));
+        let o = run(&argv!["x", &arc, out_arg(&out)]);
+        assert_eq!(code(&o), 0, "{sw:?}: {}", text(&o.stderr));
+        assert_eq!(snapshot(&out), snapshot(&src), "{sw:?}");
+    }
 }
 
 // ---------------------------------------------------------------------------

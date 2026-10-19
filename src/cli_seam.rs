@@ -3,115 +3,28 @@
 //! `wildcard`, `listfile` and `slt_format`.
 //!
 //! The capability registry assigns `src/wildcard.rs`, `src/listfile.rs` and
-//! `src/slt_format.rs` to FORGE. They were not harvested into
-//! `sprint/integration` when the CLI layer was built, so this module carries
-//! minimal implementations with the **exact public APIs** of those tickets.
-//! The CLI only calls them through `crate::cli_seam::{wildcard, listfile,
-//! slt_format}`; once the FORGE modules land, each submodule body below is
-//! replaced by a re-export (`pub use crate::wildcard::*;` etc.) and nothing
-//! else changes.
+//! `src/slt_format.rs` to FORGE. The CLI only calls them through
+//! `crate::cli_seam::{wildcard, listfile, slt_format}`. `wildcard` and
+//! `listfile` are harvested and simply re-exported here; `slt_format` is not
+//! harvested yet, so this module carries an implementation with the **exact
+//! public API** of that ticket. When FORGE's `src/slt_format.rs` lands, the
+//! `slt_format` body below becomes `pub use crate::slt_format::*;` and
+//! nothing else changes.
 //!
 //! Spec sources: 7-Zip command line documentation (wildcards, `@listfile`,
 //! `-slt`), RFC 3629 (UTF-8), RFC 2781 (UTF-16), Microsoft FILETIME (100 ns
 //! ticks since 1601-01-01 UTC) and FILE_ATTRIBUTE_* values, POSIX `ls -l`
 //! mode strings. Implemented from those descriptions; no 7-Zip source used.
 
-/// `*` / `?` wildcard matching per path component (7-Zip style).
+/// `*` / `?` wildcard matching per path component (FORGE `src/wildcard.rs`,
+/// harvested).
 pub mod wildcard {
-    fn eq_char(a: char, b: char, case_sensitive: bool) -> bool {
-        a == b || (!case_sensitive && a.to_lowercase().eq(b.to_lowercase()))
-    }
-
-    /// Match one path component. `*` = any run (also empty), `?` = one char.
-    /// Greedy backtracking, O(pattern * name) worst case.
-    pub fn match_name(pattern: &str, name: &str, case_sensitive: bool) -> bool {
-        let p: Vec<char> = pattern.chars().collect();
-        let n: Vec<char> = name.chars().collect();
-        let (mut pi, mut ni) = (0usize, 0usize);
-        let mut star: Option<(usize, usize)> = None;
-        while ni < n.len() {
-            if pi < p.len() && p[pi] == '*' {
-                star = Some((pi, ni));
-                pi += 1;
-            } else if pi < p.len() && (p[pi] == '?' || eq_char(p[pi], n[ni], case_sensitive)) {
-                pi += 1;
-                ni += 1;
-            } else if let Some((sp, sn)) = star {
-                pi = sp + 1;
-                ni = sn + 1;
-                star = Some((sp, sn + 1));
-            } else {
-                return false;
-            }
-        }
-        while pi < p.len() && p[pi] == '*' {
-            pi += 1;
-        }
-        pi == p.len()
-    }
-
-    fn components(s: &str) -> Vec<&str> {
-        s.split(['/', '\\']).filter(|c| !c.is_empty() && *c != ".").collect()
-    }
-
-    /// Match a pattern against an archive path. Anchored at the first
-    /// component unless `recursive` and the pattern has no separator; a
-    /// match of a leading part also selects everything below it.
-    pub fn match_path(pattern: &str, path: &str, recursive: bool, case_sensitive: bool) -> bool {
-        let p = components(pattern);
-        let n = components(path);
-        if p.is_empty() || p.len() > n.len() {
-            return false;
-        }
-        let anchored = !recursive || pattern.contains(['/', '\\']);
-        let last_start = if anchored { 0 } else { n.len() - p.len() };
-        (0..=last_start).any(|s| p.iter().zip(&n[s..]).all(|(pc, nc)| match_name(pc, nc, case_sensitive)))
-    }
+    pub use crate::wildcard::{match_name, match_path};
 }
 
-/// `@listfile` parsing: one path per line, UTF-8 (optional BOM) or UTF-16LE with BOM.
+/// `@listfile` parsing (FORGE `src/listfile.rs`, harvested).
 pub mod listfile {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum ListFileError {
-        LimitExceeded,
-        InvalidUtf8,
-        InvalidUtf16,
-        UnsupportedEncoding,
-        NulCharacter,
-    }
-
-    pub fn parse_listfile(data: &[u8], max_bytes: usize) -> Result<Vec<String>, ListFileError> {
-        if data.len() > max_bytes {
-            return Err(ListFileError::LimitExceeded);
-        }
-        let text = if data.starts_with(b"\xfe\xff") {
-            return Err(ListFileError::UnsupportedEncoding);
-        } else if let Some(rest) = data.strip_prefix(b"\xff\xfe") {
-            if rest.len() % 2 != 0 {
-                return Err(ListFileError::InvalidUtf16);
-            }
-            let mut units = Vec::new();
-            units.try_reserve_exact(rest.len() / 2).map_err(|_| ListFileError::LimitExceeded)?;
-            units.extend(rest.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])));
-            String::from_utf16(&units).map_err(|_| ListFileError::InvalidUtf16)?
-        } else {
-            let body = data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data);
-            std::str::from_utf8(body).map_err(|_| ListFileError::InvalidUtf8)?.to_owned()
-        };
-        if text.contains('\0') {
-            return Err(ListFileError::NulCharacter);
-        }
-        let mut out = Vec::new();
-        for line in text.split('\n') {
-            let line = line.strip_suffix('\r').unwrap_or(line);
-            let line = line.trim_matches([' ', '\t']);
-            if !line.is_empty() {
-                out.try_reserve(1).map_err(|_| ListFileError::LimitExceeded)?;
-                out.push(line.to_owned());
-            }
-        }
-        Ok(out)
-    }
+    pub use crate::listfile::{ListFileError, parse_listfile};
 }
 
 /// 7-Zip `-slt` technical listing blocks.

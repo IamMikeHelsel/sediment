@@ -30,6 +30,11 @@
 //! | `-snl` | create symbolic links on extract |
 //! | `-mx{0-9}`, `-mx={0-9}` | compression level (`a`) |
 //! | `-l` | follow symlinks on add |
+//! | `-si[NAME]` | read the archive (`l`/`t`/`x`/`e`) or the data to add (`a`) from standard input |
+//! | `-so` | write extracted data (`x`/`e`) or the archive (`a`) to standard output |
+//! | `-an` | no archive name (`a -si -so`) |
+//! | `-v{size}[b\|k\|m\|g]` | create volumes (`a`, repeatable) |
+//! | `-m{...}` | method switches, passed to the 7z writer (`a` to `.7z`) |
 //! | `--` | end of switches |
 //!
 //! Names starting with `@` are list files. Exit codes are the 7-Zip ones
@@ -37,6 +42,8 @@
 
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
+
+use crate::volume_io::parse_size;
 
 /// No error.
 pub const EXIT_OK: i32 = 0;
@@ -192,7 +199,8 @@ pub struct NameRule {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandLine {
     pub command: Command,
-    pub archive: PathBuf,
+    /// `None` only with `-si` (`l`/`t`/`x`/`e`) or `-an`.
+    pub archive: Option<PathBuf>,
     /// Names after the archive (wildcards or list files).
     pub names: Vec<NameItem>,
     pub includes: Vec<NameRule>,
@@ -225,13 +233,23 @@ pub struct CommandLine {
     pub level: Option<u8>,
     /// `-l`
     pub follow_symlinks: bool,
+    /// `-si[NAME]`: `Some(NAME)` (possibly empty).
+    pub stdin: Option<OsString>,
+    /// `-so`
+    pub to_stdout: bool,
+    /// `-an`
+    pub no_archive_name: bool,
+    /// `-v` volume sizes in bytes (the last repeats).
+    pub volumes: Vec<u64>,
+    /// Other `-m` switches, verbatim (for the 7z writer).
+    pub methods: Vec<OsString>,
 }
 
 impl CommandLine {
     fn new(command: Command) -> CommandLine {
         CommandLine {
             command,
-            archive: PathBuf::new(),
+            archive: None,
             names: Vec::new(),
             includes: Vec::new(),
             excludes: Vec::new(),
@@ -253,6 +271,11 @@ impl CommandLine {
             symlinks: false,
             level: None,
             follow_symlinks: false,
+            stdin: None,
+            to_stdout: false,
+            no_archive_name: false,
+            volumes: Vec::new(),
+            methods: Vec::new(),
         }
     }
 
@@ -295,10 +318,16 @@ enum Sw {
     CaseSensitive,
     Type,
     Yes,
+    StdIn,
+    StdOut,
+    NoArchiveName,
+    Volume,
+    Method,
 }
 
 /// Switch table: name (lower case) and id. The longest matching name wins.
-const SWITCHES: [(&str, Sw); 20] = [
+const SWITCHES: [(&str, Sw); 25] = [
+    ("an", Sw::NoArchiveName),
     ("ao", Sw::Overwrite),
     ("ba", Sw::NoHeaders),
     ("bb", Sw::LogLevel),
@@ -308,16 +337,20 @@ const SWITCHES: [(&str, Sw); 20] = [
     ("i", Sw::Include),
     ("x", Sw::Exclude),
     ("l", Sw::Follow),
+    ("m", Sw::Method),
     ("mx", Sw::Level),
     ("o", Sw::Output),
     ("r", Sw::Recurse),
     ("scs", Sw::Charset),
     ("sdel", Sw::Delete),
+    ("si", Sw::StdIn),
     ("slt", Sw::Technical),
     ("snl", Sw::Symlinks),
+    ("so", Sw::StdOut),
     ("spf", Sw::FullPaths),
     ("ssc", Sw::CaseSensitive),
     ("t", Sw::Type),
+    ("v", Sw::Volume),
     ("y", Sw::Yes),
 ];
 
@@ -487,6 +520,31 @@ fn apply_switch(cl: &mut CommandLine, arg: &OsStr) -> Result<(), CmdLineError> {
             no_param(param, &shown)?;
             cl.yes = true;
         }
+        Sw::StdIn => {
+            if cl.stdin.is_some() {
+                return Err(bad("-si given twice"));
+            }
+            let name = os_tail(arg, value_start).ok_or_else(|| bad(format!("invalid -si name: {shown}")))?;
+            if name.as_encoded_bytes().contains(&0) || name.len() > 4096 {
+                return Err(bad(format!("invalid -si name: {shown}")));
+            }
+            cl.stdin = Some(name);
+        }
+        Sw::StdOut => {
+            no_param(param, &shown)?;
+            cl.to_stdout = true;
+        }
+        Sw::NoArchiveName => {
+            no_param(param, &shown)?;
+            cl.no_archive_name = true;
+        }
+        Sw::Volume => cl.volumes.push(parse_size(param).map_err(|_| bad(format!("invalid volume size: {shown}")))?),
+        Sw::Method => {
+            if param.is_empty() {
+                return Err(bad(format!("unsupported switch: {shown}")));
+            }
+            cl.methods.push(arg.to_os_string());
+        }
     }
     Ok(())
 }
@@ -494,7 +552,7 @@ fn apply_switch(cl: &mut CommandLine, arg: &OsStr) -> Result<(), CmdLineError> {
 /// Parse the arguments that follow a 7-Zip style command.
 pub fn parse_command_line(command: Command, args: &[OsString]) -> Result<CommandLine, CmdLineError> {
     let mut cl = CommandLine::new(command);
-    let mut archive: Option<OsString> = None;
+    let mut positional: Vec<&OsString> = Vec::new();
     let mut switches = true;
     for a in args {
         let bytes = a.as_encoded_bytes();
@@ -506,18 +564,29 @@ pub fn parse_command_line(command: Command, args: &[OsString]) -> Result<Command
             apply_switch(&mut cl, a)?;
             continue;
         }
-        if archive.is_none() {
-            if bytes.is_empty() {
-                return Err(bad("empty archive name"));
-            }
-            archive = Some(a.clone());
-        } else {
-            if bytes.is_empty() {
-                return Err(bad("empty file name"));
-            }
-            cl.names.push(positional_name(a.clone()));
-        }
+        positional.push(a);
     }
-    cl.archive = PathBuf::from(archive.ok_or_else(|| bad("missing archive name"))?);
+    // With -si (reading) or -an there is no archive name: every positional is a name.
+    let nameless = cl.no_archive_name || (cl.stdin.is_some() && command != Command::Add);
+    let mut rest = positional.into_iter();
+    if !nameless {
+        let a = rest.next().ok_or_else(|| bad("missing archive name"))?;
+        if a.is_empty() {
+            return Err(bad("empty archive name"));
+        }
+        cl.archive = Some(PathBuf::from(a));
+    }
+    for a in rest {
+        if a.is_empty() {
+            return Err(bad("empty file name"));
+        }
+        cl.names.push(positional_name(a.clone()));
+    }
+    if cl.to_stdout && !cl.volumes.is_empty() {
+        return Err(bad("-so cannot be combined with -v"));
+    }
+    if cl.no_archive_name && !cl.to_stdout {
+        return Err(bad("-an requires -so"));
+    }
     Ok(cl)
 }

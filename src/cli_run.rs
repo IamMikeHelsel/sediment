@@ -22,8 +22,19 @@
 //! * `a`: `Created ...` summary (dropped by `-ba`); `-bb1` prints `+ <name>`.
 //!
 //! Messages go to the error stream (`-bse`), listings to the output stream
-//! (`-bso`); `0` discards a stream. The overwrite prompt (only when an input
-//! is supplied, i.e. stdin is a terminal) is written to the error stream.
+//! (`-bso`); `0` discards a stream. With `-so` standard output carries data
+//! only and the output stream moves to standard error. The overwrite prompt
+//! (only when standard input is a terminal and not used by `-si`) is
+//! written to the error stream.
+//!
+//! Streams and volumes: `-si` reads the archive from standard input
+//! (bounded by `SEDIMENT_STDIN_LIMIT`, see [`crate::cli_stdio`]); an
+//! archive named `*.001` is read as split volumes ([`crate::volume_io`]);
+//! `x`/`e -so` write the selected files' data to standard output; `a -so`
+//! writes the archive to standard output and `a -v<size>` writes volumes.
+//! `a -si` / `a -an` (data from standard input) run [`run_add_stdio`] with
+//! its exit codes mapped to the 7-Zip ones. `a` to `.7z` (or `-t7z`) uses
+//! [`crate::sevenz_write`] with the `-m` switches of [`crate::cli_add_7z`].
 //!
 //! Limits: archives up to [`MAX_ARCHIVE`] bytes, list files up to
 //! [`MAX_LISTFILE`] bytes, wildcard expansion up to [`MAX_WILDCARD_DEPTH`]
@@ -38,8 +49,9 @@ use crate::archive_detect::{ArchiveFormat as Detected, detect_format};
 use crate::archive_name::escape_name;
 use crate::archive_open::{StreamReader, decompress, open_named, parse_gzip_header, stream_member_name};
 use crate::archive_reader::{ArchiveFormat, ArchiveReader, ReaderError, ReaderLimits};
-use crate::bzip2_encode::{Bzip2EncodeError, encode_bzip2};
 use crate::cli_add::{ArchiveFormat as AddFormat, format_from_name};
+use crate::cli_add_7z::parse_7z_add_args;
+use crate::cli_stdio::{STDIN_LIMIT_ENV, StdioError, open_stdin_bytes, read_limited, run_add_stdio, stdin_limit};
 use crate::cli_compat::{
     ArchiveType, Charset, CmdLineError, Command, CommandLine, EXIT_CMDLINE, EXIT_FATAL, EXIT_MEMORY, EXIT_OK,
     EXIT_USER_STOP, EXIT_WARNING, NameItem, OverwriteMode, Recurse, StreamTarget, has_wildcard, parse_command_line,
@@ -48,7 +60,7 @@ use crate::cli_seam::listfile::{ListFileError, parse_listfile};
 use crate::cli_seam::slt_format::{SltEntry, format_entry};
 use crate::cli_slt::{archive_header, generic_entry, listed_size, sevenz_details};
 use crate::cli_seam::wildcard::{match_name, match_path};
-use crate::compress_wrap::{Compression, WrapError, compress, compress_bound};
+use crate::compress_wrap::{Compression, WrapError, compress, compress_bound_for};
 use crate::extract_fs::{ExtractError, ExtractOptions, OverwritePolicy, SymlinkPolicy, execute_plan};
 use crate::extract_plan::{
     EntryKind, Plan, PlanKind, PlanOptions, PlanWarning, PlannedEntry, normalize_path, plan_extraction,
@@ -57,8 +69,9 @@ use crate::fs_collect::{
     CollectError, CollectLimits, CollectOptions, CollectedEntry, EntryKind as FsKind, WarningKind, collect,
     read_entry_data,
 };
+use crate::sevenz_write::{SevenZWriteError, SevenZWriteLimits, SevenZWriteOptions, create_7z};
 use crate::tar_create::{TarCreateError, TarCreateLimits, create_tar};
-use crate::xz_encode::{XzEncodeError, XzOptions, encode_xz};
+use crate::volume_io::{VolumeError, first_volume_base, read_volumes, write_volumes};
 use crate::zip_create::{ZipCreateError, ZipCreateLimits, ZipCreateOptions, create_zip};
 
 /// Largest archive read by `l`/`t`/`x`/`e`.
@@ -70,16 +83,53 @@ pub const MAX_WILDCARD_DEPTH: usize = 256;
 /// Most paths a single wildcard may expand to for `a`.
 pub const MAX_WILDCARD_MATCHES: usize = 1_000_000;
 
-/// Streams the command talks to. `input` answers the overwrite prompt; pass
-/// `None` when not interactive (conflicts are then errors unless `-y`/`-ao`).
+/// Streams the command talks to.
 pub struct Console<'a> {
     pub stdout: &'a mut dyn Write,
     pub stderr: &'a mut dyn Write,
-    pub input: Option<&'a mut dyn BufRead>,
+    /// Standard input: the archive for `-si`, and the answers to the
+    /// overwrite prompt when `interactive`.
+    pub stdin: Option<&'a mut dyn BufRead>,
+    /// Ask before overwriting (standard input is a terminal). When false,
+    /// conflicts are errors unless `-y` / `-ao` say otherwise.
+    pub interactive: bool,
+    /// Standard output is a terminal: `a -so` refuses to write there.
+    pub stdout_is_terminal: bool,
+}
+
+/// True when `a` takes its data from standard input (`-si`, `-an`); that
+/// path is [`run_add_stdio`].
+fn add_reads_stdin(args: &[OsString]) -> bool {
+    for a in args {
+        let b = a.as_encoded_bytes();
+        if b == b"--" {
+            return false;
+        }
+        if b.len() >= 3 && b[0] == b'-' && (b[1..3].eq_ignore_ascii_case(b"si") || b[1..].eq_ignore_ascii_case(b"an")) {
+            return true;
+        }
+    }
+    false
+}
+
+/// `cli_add`-style codes of [`run_add_stdio`] to 7-Zip codes.
+fn stdio_add_code(code: i32) -> i32 {
+    match code {
+        0 => EXIT_OK,
+        1 => EXIT_FATAL,
+        2 => EXIT_CMDLINE,
+        3 => EXIT_WARNING,
+        c => c,
+    }
 }
 
 /// Parse `args` for `command` and run it. Returns the 7-Zip exit code.
 pub fn run_args(command: Command, args: &[OsString], con: &mut Console<'_>) -> i32 {
+    if command == Command::Add && add_reads_stdin(args) {
+        let _ = con.stdout.flush();
+        let _ = con.stderr.flush();
+        return stdio_add_code(run_add_stdio(args));
+    }
     match parse_command_line(command, args) {
         Ok(cl) => run(&cl, con),
         Err(CmdLineError { message }) => {
@@ -91,7 +141,9 @@ pub fn run_args(command: Command, args: &[OsString], con: &mut Console<'_>) -> i
 
 /// Run a parsed command line. Returns the 7-Zip exit code.
 pub fn run(cl: &CommandLine, con: &mut Console<'_>) -> i32 {
-    let mut ui = Ui { con, out_to: cl.stdout_to, err_to: cl.stderr_to, write_failed: false };
+    // With -so, standard output carries data only.
+    let out_to = if cl.to_stdout && cl.stdout_to == StreamTarget::Stdout { StreamTarget::Stderr } else { cl.stdout_to };
+    let mut ui = Ui { con, out_to, err_to: cl.stderr_to, write_failed: false };
     let code = match cl.command {
         Command::List | Command::Test => run_read(cl, &mut ui),
         Command::Extract | Command::ExtractFlat => run_extract(cl, &mut ui),
@@ -298,6 +350,63 @@ fn build_selector(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> Result<(Vec<NameSpec
 // Opening archives
 // ---------------------------------------------------------------------------
 
+/// Archive bytes plus the file name used for format hints.
+struct Input {
+    bytes: Vec<u8>,
+    name: Vec<u8>,
+    from_stdin: bool,
+}
+
+fn file_name_bytes(p: &Path) -> Vec<u8> {
+    p.file_name().map(|n| n.as_encoded_bytes().to_vec()).unwrap_or_default()
+}
+
+fn load_input(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> Result<Input, i32> {
+    let Some(path) = cl.archive.as_deref() else {
+        let limit = match stdin_limit(std::env::var_os(STDIN_LIMIT_ENV).as_deref()) {
+            Ok(l) => l,
+            Err(_) => {
+                ui.err("invalid SEDIMENT_STDIN_LIMIT");
+                return Err(EXIT_FATAL);
+            }
+        };
+        let Some(stdin) = ui.con.stdin.as_mut() else {
+            ui.err("standard input is not available");
+            return Err(EXIT_FATAL);
+        };
+        return match read_limited(&mut **stdin, limit) {
+            Ok(bytes) => Ok(Input { bytes, name: Vec::new(), from_stdin: true }),
+            Err(e) => {
+                let (m, c) = match e {
+                    StdioError::LimitExceeded => ("standard input exceeds the size limit", EXIT_FATAL),
+                    StdioError::Allocation => ("allocation failed", EXIT_MEMORY),
+                    _ => ("read error", EXIT_FATAL),
+                };
+                ui.err(m);
+                Err(c)
+            }
+        };
+    };
+    if let Some(base) = first_volume_base(path) {
+        return match read_volumes(&base, MAX_ARCHIVE) {
+            Ok((bytes, _)) => Ok(Input { bytes, name: file_name_bytes(&base), from_stdin: false }),
+            Err(e) => {
+                let (m, c) = match e {
+                    VolumeError::NotFound => ("cannot open file", EXIT_FATAL),
+                    VolumeError::LimitExceeded | VolumeError::TooManyVolumes => ("file too large", EXIT_FATAL),
+                    VolumeError::Allocation => ("allocation failed", EXIT_MEMORY),
+                    VolumeError::NotAFile => ("invalid file or size limit", EXIT_FATAL),
+                    _ => ("read error", EXIT_FATAL),
+                };
+                ui.err(m);
+                Err(c)
+            }
+        };
+    }
+    let bytes = read_archive(path, ui)?;
+    Ok(Input { bytes, name: file_name_bytes(path), from_stdin: false })
+}
+
 fn read_archive(p: &Path, ui: &mut Ui<'_, '_>) -> Result<Vec<u8>, i32> {
     let fail = |ui: &mut Ui<'_, '_>, m: &str, code| {
         ui.err(m);
@@ -364,13 +473,12 @@ fn gzip_member_name(raw: &[u8]) -> Option<Vec<u8>> {
 
 /// Open `bytes` as exactly one compressed stream (`-tgzip` etc.): the
 /// decompressed data is a single member, even when it is a tar archive.
-fn open_stream(bytes: &[u8], t: ArchiveType, archive: &Path, limits: ReaderLimits) -> Result<StreamReader, ReaderError> {
+fn open_stream(bytes: &[u8], t: ArchiveType, file_name: &[u8], limits: ReaderLimits) -> Result<StreamReader, ReaderError> {
     let format = match t {
         ArchiveType::Gzip => ArchiveFormat::Gzip,
         ArchiveType::Bzip2 => ArchiveFormat::Bzip2,
         _ => ArchiveFormat::Xz,
     };
-    let file_name = archive.file_name().map(|n| n.as_encoded_bytes().to_vec()).unwrap_or_default();
     let (name, mtime, crc) = if format == ArchiveFormat::Gzip {
         let h = parse_gzip_header(bytes, 4096)?;
         let crc = bytes.len().checked_sub(8).map(|t| u32::from_le_bytes([bytes[t], bytes[t + 1], bytes[t + 2], bytes[t + 3]]));
@@ -378,13 +486,14 @@ fn open_stream(bytes: &[u8], t: ArchiveType, archive: &Path, limits: ReaderLimit
     } else {
         (None, None, None)
     };
-    let name = name.unwrap_or_else(|| stream_member_name(&file_name));
+    let name = name.unwrap_or_else(|| stream_member_name(file_name));
     let max = usize::try_from(limits.max_entry_size.min(limits.max_total_size)).unwrap_or(usize::MAX);
     let data = decompress(format, bytes, max)?;
     Ok(StreamReader::new(format, name, data, mtime, crc))
 }
 
-fn open_reader<'b>(buf: &'b [u8], cl: &CommandLine, ui: &mut Ui<'_, '_>) -> Result<Box<dyn ArchiveReader + 'b>, i32> {
+fn open_reader<'b>(input: &'b Input, cl: &CommandLine, ui: &mut Ui<'_, '_>) -> Result<Box<dyn ArchiveReader + 'b>, i32> {
+    let buf = &input.bytes;
     let limits = ReaderLimits::default();
     if let Some(t) = cl.archive_type {
         if !type_matches(t, detect_format(buf)) {
@@ -392,14 +501,14 @@ fn open_reader<'b>(buf: &'b [u8], cl: &CommandLine, ui: &mut Ui<'_, '_>) -> Resu
             return Err(EXIT_FATAL);
         }
         if matches!(t, ArchiveType::Gzip | ArchiveType::Bzip2 | ArchiveType::Xz) {
-            return match open_stream(buf, t, &cl.archive, limits) {
+            return match open_stream(buf, t, &input.name, limits) {
                 Ok(r) => Ok(Box::new(r)),
                 Err(e) => Err(reader_error(ui, e)),
             };
         }
     }
-    let name = cl.archive.file_name().map(|n| n.as_encoded_bytes().to_vec()).unwrap_or_default();
-    open_named(buf, &name, limits).map_err(|e| reader_error(ui, e))
+    let opened = if input.from_stdin { open_stdin_bytes(buf, limits) } else { open_named(buf, &input.name, limits) };
+    opened.map_err(|e| reader_error(ui, e))
 }
 
 fn format_name(f: ArchiveFormat) -> &'static str {
@@ -422,17 +531,17 @@ fn run_read(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         Ok(s) => s,
         Err(c) => return c,
     };
-    let buf = match read_archive(&cl.archive, ui) {
+    let input = match load_input(cl, ui) {
         Ok(b) => b,
         Err(c) => return c,
     };
-    let reader = match open_reader(&buf, cl, ui) {
+    let reader = match open_reader(&input, cl, ui) {
         Ok(r) => r,
         Err(c) => return c,
     };
     let chosen: Vec<usize> = (0..reader.entries().len()).filter(|&i| sel.selects(&reader.entries()[i].path)).collect();
     if cl.command == Command::List {
-        list(cl, ui, reader.as_ref(), &chosen, &buf);
+        list(cl, ui, reader.as_ref(), &chosen, &input.bytes);
         EXIT_OK
     } else {
         test(cl, ui, reader.as_ref(), &chosen)
@@ -452,7 +561,7 @@ fn list(cl: &CommandLine, ui: &mut Ui<'_, '_>, reader: &dyn ArchiveReader, chose
             }
         }
         if !cl.no_headers {
-            let name = os_display(&cl.archive);
+            let name = cl.archive.as_deref().map_or_else(|| String::from("stdin"), os_display);
             ui.out(&archive_header(&name, format_name(reader.format()), buf.len() as u64, &extra));
         }
         for &i in chosen {
@@ -631,7 +740,7 @@ fn prompt_overwrite(ui: &mut Ui<'_, '_>, first: &Path, count: usize) -> Answer {
             ),
         );
         ui.flush();
-        let Some(input) = ui.con.input.as_mut() else { return Answer::Quit };
+        let Some(input) = ui.con.stdin.as_mut() else { return Answer::Quit };
         let mut line = String::new();
         match input.read_line(&mut line) {
             Ok(0) | Err(_) => return Answer::Quit,
@@ -700,21 +809,70 @@ struct Totals {
     bytes: u64,
 }
 
+/// `x`/`e -so`: the data of every selected regular file, in archive order,
+/// to standard output; nothing touches the disk. A closed pipe ends quietly
+/// with [`EXIT_WARNING`].
+fn extract_to_stdout(cl: &CommandLine, ui: &mut Ui<'_, '_>, reader: &dyn ArchiveReader, chosen: &[usize]) -> i32 {
+    let entries = reader.entries();
+    for &i in chosen {
+        let e = &entries[i];
+        if !matches!(e.kind, EntryKind::File) {
+            continue;
+        }
+        let data = match reader.read(i) {
+            Ok(d) if d.len() as u64 == e.size => d,
+            Err(ReaderError::Unsupported) => {
+                ui.err_entry("unsupported compression method", &e.path);
+                return EXIT_FATAL;
+            }
+            Err(ReaderError::Allocation) => {
+                ui.err_entry("allocation failed", &e.path);
+                return EXIT_MEMORY;
+            }
+            _ => {
+                ui.err_entry("data error", &e.path);
+                return EXIT_FATAL;
+            }
+        };
+        if let Err(err) = ui.con.stdout.write_all(&data) {
+            if err.kind() == std::io::ErrorKind::BrokenPipe {
+                return EXIT_WARNING;
+            }
+            ui.err("write error");
+            return EXIT_FATAL;
+        }
+        if cl.log_level >= 1 {
+            ui.out(&format!("- {}\n", shown(&e.path)));
+        }
+    }
+    match ui.con.stdout.flush() {
+        Ok(()) => EXIT_OK,
+        Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => EXIT_WARNING,
+        Err(_) => {
+            ui.err("write error");
+            EXIT_FATAL
+        }
+    }
+}
+
 fn run_extract(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
     let (_, sel) = match build_selector(cl, ui) {
         Ok(s) => s,
         Err(c) => return c,
     };
-    let buf = match read_archive(&cl.archive, ui) {
+    let input = match load_input(cl, ui) {
         Ok(b) => b,
         Err(c) => return c,
     };
-    let reader = match open_reader(&buf, cl, ui) {
+    let reader = match open_reader(&input, cl, ui) {
         Ok(r) => r,
         Err(c) => return c,
     };
     let entries = reader.entries();
     let chosen: Vec<usize> = (0..entries.len()).filter(|&i| sel.selects(&entries[i].path)).collect();
+    if cl.to_stdout {
+        return extract_to_stdout(cl, ui, reader.as_ref(), &chosen);
+    }
     let mut plans = Vec::new();
     for g in split_groups(cl, entries, &chosen) {
         let mut plan = match plan_extraction(&g.planned, &PlanOptions::default()) {
@@ -753,7 +911,7 @@ fn run_extract(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
 
     // Overwrite mode: -ao wins, then -y, then the interactive prompt.
     let mut mode = cl.overwrite.or(if cl.yes { Some(OverwriteMode::All) } else { None });
-    if mode.is_none() && ui.con.input.is_some() {
+    if mode.is_none() && ui.con.interactive && cl.stdin.is_none() && ui.con.stdin.is_some() {
         let existing: Vec<PathBuf> = plans.iter().flat_map(|(root, plan)| conflicts(plan, root)).map(|(_, p)| p).collect();
         if let Some(first) = existing.first() {
             match prompt_overwrite(ui, first, existing.len()) {
@@ -844,13 +1002,12 @@ pub enum AddTarget {
     Tar(Compression),
     /// One file compressed as a bare stream (`.gz`, `.bz2`, `.xz`).
     Stream(Compression),
+    SevenZ,
 }
 
 /// Why [`add_target`] found no output layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddTargetError {
-    /// 7z output has no writer yet (fatal, exit 2).
-    SevenZUnsupported,
     /// No `-t` and the name has no known extension (command line, exit 7).
     UnknownName,
 }
@@ -863,7 +1020,7 @@ pub fn add_target(archive: &Path, t: Option<ArchiveType>) -> Result<AddTarget, A
         Some(ArchiveType::Gzip) => return Ok(AddTarget::Stream(Compression::Gzip)),
         Some(ArchiveType::Bzip2) => return Ok(AddTarget::Stream(Compression::Bzip2)),
         Some(ArchiveType::Xz) => return Ok(AddTarget::Stream(Compression::Xz)),
-        Some(ArchiveType::SevenZ) => return Err(AddTargetError::SevenZUnsupported),
+        Some(ArchiveType::SevenZ) => return Ok(AddTarget::SevenZ),
         None => {}
     }
     if let Some(f) = format_from_name(archive) {
@@ -881,7 +1038,7 @@ pub fn add_target(archive: &Path, t: Option<ArchiveType>) -> Result<AddTarget, A
     } else if ends(".xz") {
         Ok(AddTarget::Stream(Compression::Xz))
     } else if ends(".7z") {
-        Err(AddTargetError::SevenZUnsupported)
+        Ok(AddTarget::SevenZ)
     } else {
         Err(AddTargetError::UnknownName)
     }
@@ -894,33 +1051,15 @@ enum BuildError {
     Fatal,
 }
 
-/// Compress with `compress_wrap`, falling back to the xz / bzip2 encoders
-/// while `compress_wrap` still reports them as unsupported.
+/// Compress one stream with `compress_wrap` (level mapping per format).
 fn compress_stream(c: Compression, data: &[u8], level: u8) -> Result<Vec<u8>, BuildError> {
-    let bound = compress_bound(data.len()).unwrap_or(usize::MAX);
-    match compress(c, data, level, bound) {
-        Ok(v) => return Ok(v),
-        Err(WrapError::Allocation) => return Err(BuildError::Memory),
-        Err(WrapError::Unsupported) => {}
-        Err(_) => return Err(BuildError::Fatal),
-    }
-    match c {
-        Compression::Xz => {
-            let opts = XzOptions::preset(u32::from(level)).map_err(|_| BuildError::Fatal)?;
-            encode_xz(data, &opts).map_err(|e| if e == XzEncodeError::Allocation { BuildError::Memory } else { BuildError::Fatal })
-        }
-        Compression::Bzip2 => {
-            // Worst case growth is small; allow 1/8 + 1 KiB headroom.
-            let max = data.len().saturating_add(data.len() / 8).saturating_add(1024);
-            encode_bzip2(data, level.max(1), max).map_err(|e| if e == Bzip2EncodeError::Allocation { BuildError::Memory } else { BuildError::Fatal })
-        }
-        _ => Err(BuildError::Fatal),
-    }
+    let bound = compress_bound_for(c, data.len()).ok_or(BuildError::Fatal)?;
+    compress(c, data, level, bound).map_err(|e| if e == WrapError::Allocation { BuildError::Memory } else { BuildError::Fatal })
 }
 
 /// A concrete input path and the archive directory its entries go under.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Input {
+struct AddInput {
     path: PathBuf,
     prefix: Vec<u8>,
 }
@@ -964,7 +1103,7 @@ fn full_path_prefix(path: &Path) -> Option<Vec<u8>> {
 }
 
 struct Expansion {
-    inputs: Vec<Input>,
+    inputs: Vec<AddInput>,
     missing: Vec<OsString>,
 }
 
@@ -986,7 +1125,7 @@ fn pattern_parts(p: &str) -> Vec<&str> {
 /// Expand one wildcard (or recursive literal) name against the file system.
 /// Matched directories are added whole; symlinked directories are not
 /// searched.
-fn expand_wildcard(spec: &NameSpec, case_sensitive: bool, out: &mut Vec<Input>) -> Result<usize, CollectError> {
+fn expand_wildcard(spec: &NameSpec, case_sensitive: bool, out: &mut Vec<AddInput>) -> Result<usize, CollectError> {
     let text = spec.name.to_string_lossy().into_owned();
     let (base, pattern) = split_wildcard(&text);
     let parts = pattern_parts(pattern);
@@ -1017,7 +1156,7 @@ fn expand_wildcard(spec: &NameSpec, case_sensitive: bool, out: &mut Vec<Input>) 
                     if out.len() >= MAX_WILDCARD_MATCHES {
                         return Err(CollectError::LimitExceeded);
                     }
-                    out.push(Input { path, prefix: rel.clone() });
+                    out.push(AddInput { path, prefix: rel.clone() });
                     found += 1;
                     continue;
                 }
@@ -1044,7 +1183,7 @@ fn expand_inputs(specs: &[NameSpec], cl: &CommandLine) -> Result<Expansion, Coll
                 exp.missing.push(spec.name.clone());
             }
         } else if std::fs::symlink_metadata(&spec.name).is_ok() {
-            exp.inputs.push(Input { path: PathBuf::from(&spec.name), prefix: Vec::new() });
+            exp.inputs.push(AddInput { path: PathBuf::from(&spec.name), prefix: Vec::new() });
         } else {
             exp.missing.push(spec.name.clone());
         }
@@ -1093,11 +1232,11 @@ struct Gathered {
 }
 
 /// Collect every input, prefix names, apply `-x`, sort and de-duplicate.
-fn gather(cl: &CommandLine, ui: &mut Ui<'_, '_>, inputs: &[Input], sel: &Selector) -> Result<Gathered, i32> {
+fn gather(cl: &CommandLine, ui: &mut Ui<'_, '_>, inputs: &[AddInput], sel: &Selector) -> Result<Gathered, i32> {
     let options = CollectOptions {
         follow_symlinks: cl.follow_symlinks,
         strict: false,
-        exclude: vec![cl.archive.clone()],
+        exclude: cl.archive.iter().cloned().collect(),
     };
     let mut limits = CollectLimits::default();
     let mut out = Gathered { entries: Vec::new(), warned: false, total_bytes: 0 };
@@ -1175,6 +1314,7 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
 fn build_archive(
     target: AddTarget,
     level: u8,
+    sevenz: &SevenZWriteOptions,
     g: &Gathered,
     ui: &mut Ui<'_, '_>,
 ) -> Result<Vec<u8>, i32> {
@@ -1215,6 +1355,14 @@ fn build_archive(
                 return Err(EXIT_FATAL);
             }
         },
+        AddTarget::SevenZ => match create_7z(&entries, sevenz, SevenZWriteLimits::default()) {
+            Ok(b) => Ok(b),
+            Err(SevenZWriteError::Allocation) => Err(BuildError::Memory),
+            Err(e) => {
+                ui.err(&format!("cannot build 7z: {e:?}"));
+                return Err(EXIT_FATAL);
+            }
+        },
         AddTarget::Stream(c) => {
             let files: Vec<usize> = (0..g.entries.len()).filter(|&i| g.entries[i].kind == FsKind::File).collect();
             if files.len() != 1 || g.entries.len() != 1 {
@@ -1252,32 +1400,81 @@ fn delete_sources(entries: &[CollectedEntry], ui: &mut Ui<'_, '_>) -> bool {
     ok
 }
 
+/// 7z writer options from `-mx` and the `-m` switches (parsed by
+/// [`parse_7z_add_args`], so the spellings match `cli_add_7z`).
+fn sevenz_options(cl: &CommandLine) -> Result<SevenZWriteOptions, String> {
+    let mut args: Vec<OsString> = Vec::new();
+    if let Some(l) = cl.level {
+        args.push(format!("-mx{l}").into());
+    }
+    args.extend(cl.methods.iter().cloned());
+    args.push("--".into());
+    args.push("x.7z".into());
+    args.push(".".into());
+    parse_7z_add_args(&args).map(|a| a.options)
+}
+
+fn volume_msg(e: VolumeError) -> &'static str {
+    match e {
+        VolumeError::InvalidSize => "invalid volume size",
+        VolumeError::TooManyVolumes => "too many volumes (raise the -v size)",
+        VolumeError::NotFound => "volume not found",
+        VolumeError::Exists => "volume exists (use -y to overwrite)",
+        VolumeError::NotAFile => "volume path is not a regular file",
+        VolumeError::LimitExceeded => "volumes exceed the size limit",
+        VolumeError::Allocation => "out of memory",
+        VolumeError::Io => "cannot write volume",
+    }
+}
+
 fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
-    let target = match add_target(&cl.archive, cl.archive_type) {
+    // -an / -si never reach here (see `run_args`), so the name is present.
+    let Some(archive) = cl.archive.as_deref() else {
+        ui.err("missing archive name");
+        return EXIT_CMDLINE;
+    };
+    let target = match add_target(archive, cl.archive_type) {
         Ok(t) => t,
-        Err(AddTargetError::SevenZUnsupported) => {
-            ui.err("creating 7z archives is not supported yet");
-            return EXIT_FATAL;
-        }
         Err(AddTargetError::UnknownName) => {
-            ui.err("cannot infer archive format from name (use -t or .zip, .tar, .tar.gz, .tgz, .gz, .bz2, .xz)");
+            ui.err("cannot infer archive format from name (use -t or .zip, .7z, .tar, .tar.gz, .tgz, .tar.xz, .tar.bz2, .gz, .bz2, .xz)");
             return EXIT_CMDLINE;
         }
     };
-    let (mut specs, sel) = match build_selector(cl, ui) {
+    let sevenz = if target == AddTarget::SevenZ {
+        match sevenz_options(cl) {
+            Ok(o) => o,
+            Err(m) => {
+                ui.err(&m);
+                return EXIT_CMDLINE;
+            }
+        }
+    } else if let Some(m) = cl.methods.first() {
+        ui.err(&format!("method switch applies to 7z archives only: {}", m.to_string_lossy()));
+        return EXIT_CMDLINE;
+    } else {
+        SevenZWriteOptions::default()
+    };
+    if cl.to_stdout && ui.con.stdout_is_terminal {
+        ui.err("refusing to write archive data to a terminal (-so)");
+        return EXIT_CMDLINE;
+    }
+    let (specs, sel) = match build_selector(cl, ui) {
         Ok(s) => s,
         Err(c) => return c,
     };
+    // 7-Zip would add `*` here; an explicit name is required so a forgotten
+    // argument never archives the whole working directory.
     if specs.is_empty() {
-        let recursive = cl.recurse.unwrap_or(Recurse::Off).applies_to("*");
-        specs.push(NameSpec { name: OsString::from("*"), recursive });
+        ui.err("missing file names (use * to add everything in the current directory)");
+        return EXIT_CMDLINE;
     }
-    if let Ok(m) = std::fs::symlink_metadata(&cl.archive) {
-        if m.is_dir() {
+    let writes_file = !cl.to_stdout && cl.volumes.is_empty();
+    if let Ok(m) = std::fs::symlink_metadata(archive) {
+        if writes_file && m.is_dir() {
             ui.err("archive path is a directory");
             return EXIT_FATAL;
         }
-        if !cl.yes {
+        if writes_file && !cl.yes {
             ui.err("archive exists (use -y to overwrite; update is not supported)");
             return EXIT_FATAL;
         }
@@ -1304,11 +1501,30 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         return EXIT_WARNING;
     }
     let level = cl.level.unwrap_or(5);
-    let bytes = match build_archive(target, level, &g, ui) {
+    let bytes = match build_archive(target, level, &sevenz, &g, ui) {
         Ok(b) => b,
         Err(c) => return c,
     };
-    if let Err(m) = write_atomically(&cl.archive, &bytes) {
+    let mut where_ = String::new();
+    if cl.to_stdout {
+        let res = ui.con.stdout.write_all(&bytes).and_then(|_| ui.con.stdout.flush());
+        match res {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return EXIT_WARNING,
+            Err(_) => {
+                ui.err("write error");
+                return EXIT_FATAL;
+            }
+        }
+    } else if !cl.volumes.is_empty() {
+        match write_volumes(archive, &bytes, &cl.volumes, cl.yes) {
+            Ok(n) => where_ = format!(" in {n} volumes"),
+            Err(e) => {
+                ui.err(volume_msg(e));
+                return if e == VolumeError::Allocation { EXIT_MEMORY } else { EXIT_FATAL };
+            }
+        }
+    } else if let Err(m) = write_atomically(archive, &bytes) {
         ui.err(&m);
         return EXIT_FATAL;
     }
@@ -1320,8 +1536,8 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
     if !cl.no_headers {
         let files = g.entries.iter().filter(|e| e.kind == FsKind::File).count();
         ui.out(&format!(
-            "Created {} ({} entries, {} files, {} bytes in, {} bytes out)\n",
-            cl.archive.display(),
+            "Created {}{where_} ({} entries, {} files, {} bytes in, {} bytes out)\n",
+            archive.display(),
             g.entries.len(),
             files,
             g.total_bytes,
@@ -1333,4 +1549,3 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
     }
     if warned { EXIT_WARNING } else { EXIT_OK }
 }
-
