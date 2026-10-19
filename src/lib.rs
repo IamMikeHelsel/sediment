@@ -77,3 +77,5 @@ pub mod zipcrypto;
 pub mod lzma_encode;
 pub mod lzma2_encode;
 pub mod xz_encode;
+pub mod sevenz_write;
+pub mod cli_add_7z;
