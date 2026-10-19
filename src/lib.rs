@@ -81,6 +81,8 @@ pub mod lzma_properties;
 pub mod lzx;
 pub mod mszip;
 pub mod pax_record_write;
+pub mod ppmd7;
+pub mod ppmd8;
 pub mod reader;
 pub mod rpm_archive;
 pub mod sevenz_aes_coder;
