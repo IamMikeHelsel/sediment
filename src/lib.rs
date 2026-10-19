@@ -78,3 +78,8 @@ pub mod lzma_encode;
 pub mod lzma2_encode;
 pub mod xz_encode;
 pub mod archive_open;
+pub mod lzx;
+pub mod mszip;
+pub mod cab_read;
+pub mod cfb_read;
+pub mod chm_read;
