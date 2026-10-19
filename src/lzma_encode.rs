@@ -1026,7 +1026,7 @@ impl<'a> Encoder<'a> {
             for slot in 0..64u32 {
                 let mut v = tree_price(t, &m.pos_slot[ls], 6, slot);
                 if slot >= 14 {
-                    v += (((slot >> 1) - 1 - 4) as u32) << 4;
+                    v += ((slot >> 1) - 1 - 4) << 4;
                 }
                 p.slot[ls][slot as usize] = v;
             }
