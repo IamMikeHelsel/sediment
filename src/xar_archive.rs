@@ -7,8 +7,11 @@
 //! for the table of contents. Layout (big-endian):
 //! - Header: magic `xar!`, header size u16 (>= 28), version u16 (1), TOC
 //!   compressed length u64, TOC uncompressed length u64, checksum algorithm
-//!   u32 (0 none, 1 SHA-1, 2 MD5, 3 named: a NUL-terminated algorithm name
-//!   such as `sha256` follows inside the header).
+//!   u32 (0 none, 1 SHA-1, 2 MD5, 3 "other", 4 SHA-512). For 3 the libxar
+//!   layout puts a NUL-terminated algorithm name such as `sha256` inside a
+//!   longer header; Apple's `xar --toc-cksum=sha256` instead writes a bare
+//!   28-byte header and names the algorithm only in the TOC
+//!   `<checksum style="sha256">` (SHA-256 when absent). Both are read.
 //! - TOC: zlib-compressed XML right after the header. The heap starts after
 //!   the compressed TOC. `<toc><checksum style=..><offset/><size/>` locates
 //!   the digest of the compressed TOC in the heap; it is verified.
@@ -118,7 +121,8 @@ pub struct XarHeader {
     pub toc_compressed: u64,
     pub toc_uncompressed: u64,
     pub checksum_alg: u32,
-    /// Algorithm name for `checksum_alg == 3`.
+    /// Algorithm name for `checksum_alg == 3` (empty when the header is the
+    /// bare 28 bytes Apple's xar writes; the TOC then names the algorithm).
     pub checksum_name: Option<String>,
 }
 
@@ -380,15 +384,29 @@ impl<'a> XarReader<'a> {
             return Err(XarError::BadToc.into());
         }
         let toc_node = doc.child(0, "toc").ok_or(XarError::BadToc)?;
-        // TOC checksum.
+        // TOC checksum. Header ids: 0 none, 1 SHA-1, 2 MD5, 3 "other" and 4
+        // SHA-512. For 3, the original libxar layout carries the algorithm
+        // name after the 28 fixed bytes (header_size > 28); Apple's xar
+        // (`--toc-cksum=sha256`) writes a bare 28-byte header and records the
+        // algorithm only in the TOC's `<checksum style=...>`, defaulting to
+        // SHA-256. Apple writes id 4 for `--toc-cksum=sha512`.
+        let toc_cksum = doc.child(toc_node, "checksum");
         let alg = match (header.checksum_alg, header.checksum_name.as_deref()) {
             (0, _) => None,
             (1, _) => Some(XarHash::Sha1),
             (2, _) => Some(XarHash::Md5),
-            (3, Some(n)) => Some(XarHash::from_style(n).ok_or(ReaderError::Unsupported)?),
+            (3, Some(n)) if !n.is_empty() => Some(XarHash::from_style(n).ok_or(ReaderError::Unsupported)?),
+            (3, _) => match toc_cksum.and_then(|c| doc.node(c).attr("style")) {
+                None => Some(XarHash::Sha256),
+                Some(st) => match XarHash::from_style(st) {
+                    Some(h @ (XarHash::Sha256 | XarHash::Sha512)) => Some(h),
+                    _ => return Err(ReaderError::Unsupported),
+                },
+            },
+            (4, _) => Some(XarHash::Sha512),
             _ => return Err(ReaderError::Unsupported),
         };
-        if let (Some(alg), Some(c)) = (alg, doc.child(toc_node, "checksum")) {
+        if let (Some(alg), Some(c)) = (alg, toc_cksum) {
             let off = num(&doc, c, "offset")?.ok_or(XarError::BadToc)?;
             let size = num(&doc, c, "size")?.ok_or(XarError::BadToc)?;
             let stored = off

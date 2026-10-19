@@ -66,6 +66,8 @@ const MANIFESTED: [(&str, ArchiveFormat); 17] = [
 fn manifests_match_oracle() {
     let mut names: Vec<(&str, ArchiveFormat)> = MANIFESTED.to_vec();
     names.push(("sample-sha256.xar", ArchiveFormat::Xar));
+    names.push(("sample-apple-sha256.xar", ArchiveFormat::Xar));
+    names.push(("sample-apple-sha512.xar", ArchiveFormat::Xar));
     for (name, format) in names {
         let bytes = load(name);
         let r = open(&bytes, name).unwrap_or_else(|e| panic!("{name}: {e:?}"));
@@ -254,6 +256,91 @@ fn xar_details() {
     // XML parser robustness on the real TOC shape.
     let x = parse_xml(b"<xar><toc><file id=\"1\"><name>a</name></file></toc></xar>", &XmlLimits::default()).unwrap();
     assert_eq!(x.nodes.len(), 4);
+}
+
+/// TOC checksum header conventions: libxar's named alg 3 (36-byte header)
+/// and Apple's bare 28-byte header with alg 3 (SHA-256, named in the TOC)
+/// or alg 4 (SHA-512).
+#[test]
+fn xar_toc_checksum_layouts() {
+    let a256 = load("sample-apple-sha256.xar");
+    let h = xar_header(&a256).unwrap();
+    assert_eq!((h.header_size, h.checksum_alg, h.checksum_name.as_deref()), (28, 3, Some("")));
+    let a512 = load("sample-apple-sha512.xar");
+    let h = xar_header(&a512).unwrap();
+    assert_eq!((h.header_size, h.checksum_alg, h.checksum_name.as_deref()), (28, 4, None));
+    for b in [&a256, &a512] {
+        assert_eq!(open(b, "x.xar").unwrap().entries().len(), 12);
+        // The digest is really checked: flip one byte of the stored TOC digest.
+        let tc = u64::from_be_bytes(b[8..16].try_into().unwrap()) as usize;
+        let mut v = b.clone();
+        v[28 + tc] ^= 1;
+        assert_eq!(open(&v, "x.xar").err(), Some(ReaderError::CrcMismatch));
+        // Unknown algorithm ids stay unsupported.
+        let mut v = b.clone();
+        v[27] = 5;
+        assert_eq!(open(&v, "x.xar").err(), Some(ReaderError::Unsupported));
+    }
+    // Bare alg 3 takes the algorithm from the TOC (here style="sha512").
+    let mut v = a512.clone();
+    v[27] = 3;
+    assert!(open(&v, "x.xar").is_ok());
+    // Alg 4 is SHA-512 regardless of the TOC: a SHA-256 digest mismatches.
+    let mut v = a256.clone();
+    v[27] = 4;
+    assert_eq!(open(&v, "x.xar").err(), Some(ReaderError::CrcMismatch));
+    // Bare alg 3 with a TOC style other than sha256/sha512 is refused.
+    let mut v = load("sample-sha1.xar");
+    v[27] = 3;
+    assert_eq!(open(&v, "x.xar").err(), Some(ReaderError::Unsupported));
+}
+
+/// Differential against the platform oracle when it exists (macOS
+/// /usr/bin/xar): archives it writes with each `--toc-cksum` must open and
+/// read back byte-identical content. Skipped where xar is not installed.
+#[test]
+fn xar_platform_oracle() {
+    let xar = Path::new("/usr/bin/xar");
+    if !xar.exists() {
+        return;
+    }
+    static N: AtomicU32 = AtomicU32::new(0);
+    let dir = std::env::temp_dir().join(format!("sediment-xar-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("d/sub")).unwrap();
+    let payload: Vec<u8> = (0..5000u32).map(|i| (i * 7 % 251) as u8).collect();
+    fs::write(dir.join("d/a.txt"), b"hi\n").unwrap();
+    fs::write(dir.join("d/sub/b.bin"), &payload).unwrap();
+    for alg in ["sha1", "sha256", "sha512"] {
+        let out = dir.join(format!("t-{alg}.xar"));
+        let st = Command::new(xar)
+            .current_dir(&dir)
+            .args([&format!("--toc-cksum={alg}"), &format!("--file-cksum={alg}"), "-cf"])
+            .arg(&out)
+            .arg("d")
+            .output()
+            .unwrap();
+        assert!(st.status.success(), "{alg}: {}", String::from_utf8_lossy(&st.stderr));
+        let bytes = fs::read(&out).unwrap();
+        let r = open(&bytes, "t.xar").unwrap_or_else(|e| panic!("{alg}: {e:?}"));
+        let mut seen = 0;
+        for (i, e) in r.entries().iter().enumerate() {
+            let want: Option<&[u8]> = match e.path.as_slice() {
+                b"d/a.txt" => Some(b"hi\n"),
+                b"d/sub/b.bin" => Some(&payload),
+                _ => None,
+            };
+            if let Some(w) = want {
+                assert_eq!(r.read(i).unwrap_or_else(|e| panic!("{alg}: {e:?}")), w, "{alg}");
+                seen += 1;
+            }
+        }
+        assert_eq!(seen, 2, "{alg}");
+        let o = Command::new(BIN).arg("l").arg(&out).output().unwrap();
+        assert!(o.status.success(), "{alg}: {}", String::from_utf8_lossy(&o.stderr));
+        assert!(String::from_utf8_lossy(&o.stdout).contains("d/sub/b.bin"), "{alg}");
+    }
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]

@@ -463,10 +463,16 @@ def xml_esc(s):
 
 
 class Xar:
-    def __init__(self, toc_alg="sha1"):
+    # layout "named": libxar convention, alg 3 + NUL-terminated name inside a
+    # longer header. layout "apple": what macOS /usr/bin/xar writes with
+    # --toc-cksum=sha256|sha512 -- a bare 28-byte header with alg 3 (SHA-256)
+    # or 4 (SHA-512); the algorithm is named only in <checksum style=...>.
+    # The "apple" fixtures were cross-checked with Apple's `xar -tf`/`-xf`.
+    def __init__(self, toc_alg="sha1", layout="named"):
         self.heap = bytearray()
         self.toc_alg = toc_alg
-        self.hsize = {"sha1": 20, "md5": 16, "sha256": 32}[toc_alg]
+        self.layout = layout
+        self.hsize = {"sha1": 20, "md5": 16, "sha256": 32, "sha512": 64}[toc_alg]
         self.heap.extend(b"\0" * self.hsize)  # TOC digest slot
         self.next_id = 1
 
@@ -503,15 +509,17 @@ class Xar:
                 "<mtime>2024-03-05T06:07:08Z</mtime>%s%s</file>" % (fid, nm, type_attr, ftype, mode, inner, children))
 
     def build(self, files_xml):
-        alg_id = {"sha1": 1, "md5": 2, "sha256": 3}[self.toc_alg]
+        alg_id = {"sha1": 1, "md5": 2, "sha256": 3, "sha512": 4}[self.toc_alg]
+        if self.toc_alg == "sha512" and self.layout == "named":
+            alg_id = 3
         toc = ('<?xml version="1.0" encoding="UTF-8"?>\n<xar><toc>'
                '<creation-time>2024-03-05T06:07:08</creation-time>'
                '<checksum style="%s"><offset>0</offset><size>%d</size></checksum>%s</toc></xar>\n'
                % (self.toc_alg, self.hsize, files_xml)).encode()
         ctoc = zlib.compress(toc, 9)
         self.heap[: self.hsize] = hashlib.new(self.toc_alg, ctoc).digest()
-        if alg_id == 3:
-            name = b"sha256\0"
+        if alg_id == 3 and self.layout == "named":
+            name = self.toc_alg.encode() + b"\0"
             hsize = 28 + len(name) + (-len(name)) % 4
             extra = name + b"\0" * (hsize - 28 - len(name))
         else:
@@ -521,8 +529,13 @@ class Xar:
 
 
 def gen_xar():
-    for toc_alg in ["sha1", "sha256"]:
-        x = Xar(toc_alg)
+    for toc_alg, layout, name in [
+        ("sha1", "named", "sample-sha1.xar"),
+        ("sha256", "named", "sample-sha256.xar"),
+        ("sha256", "apple", "sample-apple-sha256.xar"),
+        ("sha512", "apple", "sample-apple-sha512.xar"),
+    ]:
+        x = Xar(toc_alg, layout)
         f_readme = x.file("readme.txt", "file", 0o644, x.data(README, "application/octet-stream"), fid=3)
         f_tool = x.file("tool", "file", 0o755, x.data(TOOL, "application/x-gzip"), fid=4)
         f_text = x.file("text.txt", "file", 0o644, x.data(TEXT, "application/x-bzip2"), fid=5)
@@ -539,7 +552,6 @@ def gen_xar():
         sub = x.file("sub", "directory", 0o700, children=f_xz + f_lz, fid=2)
         docs = x.file("docs", "directory", 0o755, children=f_readme + f_tool + f_text + sub, fid=1)
         data = x.build(docs + f_orig + f_link + f_sym + f_utf + f_empty + f_fifo)
-        name = "sample-%s.xar" % toc_alg
         write(name, data)
         M = MTIME
         manifest(name, [
