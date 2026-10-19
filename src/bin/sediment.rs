@@ -256,6 +256,7 @@ fn cmd_test(reader: &dyn ArchiveReader) {
     for (i, e) in entries.iter().enumerate() {
         match reader.read(i) {
             Ok(d) if !matches!(e.kind, EntryKind::File) || d.len() as u64 == e.size => {}
+            Err(ReaderError::Unsupported) => err_entry("unsupported compression method", &e.path, EXIT_FATAL),
             _ => err_entry("data error", &e.path, EXIT_FATAL),
         }
         total = match total.checked_add(e.size) {

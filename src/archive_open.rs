@@ -306,8 +306,16 @@ impl<'a> TarReader<'a> {
             if t.data_range.end > data.len() || (t.data_range.len() as u64) < size {
                 return Err(ReaderError::Invalid);
             }
+            let range = t.data_range.start..t.data_range.start + to_usize(size);
+            // The extractor copies a hard link from its source member and
+            // expects the source's size here; an unresolved target keeps 0
+            // and is rejected by the planner.
+            let size = match &kind {
+                EntryKind::Hardlink { target } => hardlink_source_size(&entries, target),
+                _ => size,
+            };
             entries.push(PlannedEntry { path: t.path, kind, size, mode: Some(t.mode & 0o7777), mtime: Some(t.mtime) });
-            ranges.push(t.data_range.start..t.data_range.start + to_usize(size));
+            ranges.push(range);
         }
         Ok(TarReader { data, entries, ranges, max_entry_size: limits.max_entry_size, skipped_special })
     }
@@ -316,6 +324,27 @@ impl<'a> TarReader<'a> {
     pub fn skipped_special(&self) -> usize {
         self.skipped_special
     }
+}
+
+fn trim_tar_path(p: &[u8]) -> &[u8] {
+    let mut p = p;
+    while let Some(r) = p.strip_prefix(b"./") {
+        p = r;
+    }
+    while let Some(r) = p.strip_suffix(b"/") {
+        p = r;
+    }
+    p
+}
+
+/// Size of the most recent earlier regular file named `target`.
+fn hardlink_source_size(entries: &[PlannedEntry], target: &[u8]) -> u64 {
+    let want = trim_tar_path(target);
+    entries
+        .iter()
+        .rev()
+        .find(|e| matches!(e.kind, EntryKind::File) && trim_tar_path(&e.path) == want)
+        .map_or(0, |e| e.size)
 }
 
 impl ArchiveReader for TarReader<'_> {
