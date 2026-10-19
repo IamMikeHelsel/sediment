@@ -53,3 +53,8 @@ pub mod sevenz_header;
 pub mod sevenz_read;
 pub mod tar_read;
 pub mod xz_decode;
+pub mod aes;
+pub mod hmac_sha1;
+pub mod sevenz_aes_kdf;
+pub mod winzip_aes_kdf;
+pub mod zipcrypto;
