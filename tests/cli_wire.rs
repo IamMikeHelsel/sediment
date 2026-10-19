@@ -275,12 +275,18 @@ fn add_then_extract_round_trips() {
 #[test]
 fn add_reports_usage_and_unsupported() {
     let t = TempDir::new("au");
-    assert_eq!(run(&["a"]).status.code(), Some(2));
+    assert_eq!(run(&["a"]).status.code(), Some(7));
     let f = t.0.join("f.txt");
     fs::write(&f, b"x").unwrap();
+    // .tar.bz2 is written through the bzip2 encoder (cli_run fallback).
     let o = run(&["a".as_ref(), t.0.join("x.tar.bz2").as_os_str(), f.as_os_str()]);
-    assert_eq!(o.status.code(), Some(1));
-    assert!(!t.0.join("x.tar.bz2").exists());
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    let o = run(&["t".as_ref(), t.0.join("x.tar.bz2").as_os_str()]);
+    assert_eq!(text(&o.stdout), "OK\t1\t1\n");
+    // 7z output has no writer yet: fatal, nothing written.
+    let o = run(&["a".as_ref(), t.0.join("x.7z").as_os_str(), f.as_os_str()]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(!t.0.join("x.7z").exists());
 }
 
 /// Every hostile archive is refused by `x` (with and without -snl) and

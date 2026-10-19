@@ -79,3 +79,5 @@ pub mod lzma2_encode;
 pub mod xz_encode;
 pub mod archive_open;
 pub mod cli_seam;
+pub mod cli_compat;
+pub mod cli_run;

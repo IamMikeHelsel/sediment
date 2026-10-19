@@ -1,56 +1,33 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Sediment command line.
 //!
-//! Commands (7-Zip style names):
-//!   l ARCHIVE                 list members
-//!   t ARCHIVE                 test integrity
-//!   x [switches] ARCHIVE      extract with full paths
-//!   e [switches] ARCHIVE      extract without directory structure
-//!   a [switches] ARCHIVE PATHS...  create an archive (see `cli_add`)
+//! Commands (7-Zip style names, see `cli_compat` for the switches):
+//!   l [switches] ARCHIVE [NAMES...]   list members (`-slt` technical listing)
+//!   t [switches] ARCHIVE [NAMES...]   test integrity
+//!   x [switches] ARCHIVE [NAMES...]   extract with full paths
+//!   e [switches] ARCHIVE [NAMES...]   extract without directory structure
+//!   a [switches] ARCHIVE [NAMES...]   create an archive
 //!   list|test ARCHIVE         original ZIP-only commands (frozen output)
 //! Readable formats for l/t/x/e: zip, tar, gzip/bzip2/xz single streams,
 //!   tar.gz/tgz, tar.bz2/tbz2/tbz, tar.xz/txz and 7z (see `archive_open`).
-//! Switches for x/e: -o<dir> output directory, -y assume yes (overwrite),
-//!   -aoa overwrite all, -aos skip existing, -aou auto-rename new files,
-//!   -snl create symbolic links (default: skip them with a warning),
-//!   -- end of switches.
-//! Exit codes: 0 success; 1 warning (some members not extracted) or, for
-//!   `list`/`test`, any failure; 2 fatal error or usage error. `a` keeps the
-//!   codes documented in `cli_add` (1 fatal, 2 usage, 3 inputs skipped).
+//! Exit codes for l/t/x/e/a (7-Zip): 0 ok, 1 warning, 2 fatal error,
+//!   7 command line error, 8 out of memory, 255 stopped by the user.
+//!   `list`/`test`/`--help` keep their frozen codes (1 failure, 2 usage),
+//!   as does a missing or unknown command (2).
 use std::ffi::{OsStr, OsString};
-use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::io::{self, IsTerminal, Read, Write};
+use std::path::Path;
 use std::process;
 
 use sediment_engine::archive_name::escape_name;
-use sediment_engine::archive_open::open_named;
-use sediment_engine::archive_reader::{ArchiveReader, ReaderError, ReaderLimits};
-use sediment_engine::cli_add::run_add;
-use sediment_engine::extract_fs::{execute_plan, ExtractOptions, OverwritePolicy, SymlinkPolicy};
-use sediment_engine::extract_plan::{
-    normalize_path, plan_extraction, EntryKind, Plan, PlanKind, PlanOptions, PlanWarning, PlannedEntry,
-};
+use sediment_engine::cli_compat::Command;
+use sediment_engine::cli_run::{Console, run_args};
 use sediment_engine::zip_decode::entry_data;
 use sediment_engine::zip_index::{parse_entries, ZipLimits};
-
-const EXIT_WARNING: i32 = 1;
-const EXIT_FATAL: i32 = 2;
-const MAX_ARCHIVE: u64 = 1 << 30;
 
 fn err(msg: &'static str, code: i32) -> ! {
     let _ = writeln!(io::stderr().lock(), "sediment: {msg}");
     process::exit(code);
-}
-
-fn err_entry(msg: &str, name: &[u8], code: i32) -> ! {
-    let shown = escape_name(name).unwrap_or_else(|_| String::from("?"));
-    let _ = writeln!(io::stderr().lock(), "sediment: {msg}: {shown}");
-    process::exit(code);
-}
-
-fn warn(msg: &str, name: &[u8]) {
-    let shown = escape_name(name).unwrap_or_else(|_| String::from("?"));
-    let _ = writeln!(io::stderr().lock(), "sediment: warning: {msg}: {shown}");
 }
 
 fn main() {
@@ -77,19 +54,19 @@ fn main() {
     let rest: Vec<OsString> = args.collect();
     if cmd == "list" || cmd == "test" {
         legacy(&cmd, rest);
-    } else if cmd == "l" || cmd == "t" {
-        let path = single_path(rest);
-        let buf = read_archive(Path::new(&path), MAX_ARCHIVE);
-        let reader = open_reader(&buf, Path::new(&path));
-        if cmd == "l" {
-            cmd_list(reader.as_ref());
-        } else {
-            cmd_test(reader.as_ref());
-        }
-    } else if cmd == "x" || cmd == "e" {
-        cmd_extract(cmd == "e", rest);
-    } else if cmd == "a" {
-        process::exit(run_add(&rest));
+    } else if let Some(command) = Command::from_name(&cmd) {
+        let stdin = io::stdin();
+        let interactive = stdin.is_terminal();
+        let mut input = stdin.lock();
+        let mut stdout = io::stdout().lock();
+        let mut stderr = io::stderr().lock();
+        let mut con = Console {
+            stdout: &mut stdout,
+            stderr: &mut stderr,
+            input: if interactive { Some(&mut input) } else { None },
+        };
+        let code = run_args(command, &rest, &mut con);
+        process::exit(code);
     } else {
         err("unknown command", 2);
     }
@@ -180,251 +157,5 @@ fn legacy(cmd: &OsStr, rest: Vec<OsString>) {
     }
     if out.flush().is_err() {
         err("flush error", 1);
-    }
-}
-
-fn read_archive(p: &Path, max: u64) -> Vec<u8> {
-    let f = match std::fs::File::open(p) {
-        Ok(f) => f,
-        Err(_) => err("cannot open file", EXIT_FATAL),
-    };
-    let m = match f.metadata() {
-        Ok(m) => m,
-        Err(_) => err("cannot read file metadata", EXIT_FATAL),
-    };
-    if !m.is_file() || m.len() > max {
-        err("invalid file or size limit", EXIT_FATAL);
-    }
-    let mut buf = Vec::new();
-    if buf.try_reserve_exact(m.len() as usize + 1).is_err() {
-        err("allocation failed", EXIT_FATAL);
-    }
-    if f.take(max + 1).read_to_end(&mut buf).is_err() {
-        err("read error", EXIT_FATAL);
-    }
-    if buf.len() as u64 > max {
-        err("file too large", EXIT_FATAL);
-    }
-    buf
-}
-
-fn file_name_bytes(p: &Path) -> Vec<u8> {
-    p.file_name().map(|n| n.as_encoded_bytes().to_vec()).unwrap_or_default()
-}
-
-fn open_reader<'a>(buf: &'a [u8], path: &Path) -> Box<dyn ArchiveReader + 'a> {
-    match open_named(buf, &file_name_bytes(path), ReaderLimits::default()) {
-        Ok(r) => r,
-        Err(ReaderError::Unsupported) => err("unsupported archive format", EXIT_FATAL),
-        Err(ReaderError::CrcMismatch) => err("data error (checksum mismatch)", EXIT_FATAL),
-        Err(ReaderError::LimitExceeded) => err("archive exceeds limits", EXIT_FATAL),
-        Err(ReaderError::Allocation) => err("allocation failed", EXIT_FATAL),
-        Err(_) => err("parse error", EXIT_FATAL),
-    }
-}
-
-fn cmd_list(reader: &dyn ArchiveReader) {
-    let mut out = io::stdout().lock();
-    if out.write_all(b"SIZE\tCRC32\tNAME\n").is_err() {
-        err("write error", EXIT_FATAL);
-    }
-    for (i, e) in reader.entries().iter().enumerate() {
-        let esc = match escape_name(&e.path) {
-            Ok(s) => s,
-            Err(_) => err("escape error", EXIT_FATAL),
-        };
-        let crc = match reader.crc32(i) {
-            Some(c) => format!("{c:08x}"),
-            None => String::from("--------"),
-        };
-        let size = match &e.kind {
-            EntryKind::Symlink { target } => target.len() as u64,
-            _ => e.size,
-        };
-        if writeln!(out, "{size}\t{crc}\t{esc}").is_err() {
-            err("write error", EXIT_FATAL);
-        }
-    }
-    if out.flush().is_err() {
-        err("flush error", EXIT_FATAL);
-    }
-}
-
-fn cmd_test(reader: &dyn ArchiveReader) {
-    let mut total: u64 = 0;
-    let entries = reader.entries();
-    for (i, e) in entries.iter().enumerate() {
-        match reader.read(i) {
-            Ok(d) if !matches!(e.kind, EntryKind::File) || d.len() as u64 == e.size => {}
-            Err(ReaderError::Unsupported) => err_entry("unsupported compression method", &e.path, EXIT_FATAL),
-            _ => err_entry("data error", &e.path, EXIT_FATAL),
-        }
-        total = match total.checked_add(e.size) {
-            Some(v) => v,
-            None => err("overflow", EXIT_FATAL),
-        };
-    }
-    let mut out = io::stdout().lock();
-    if writeln!(out, "OK\t{}\t{total}", entries.len()).is_err() || out.flush().is_err() {
-        err("write error", EXIT_FATAL);
-    }
-}
-
-struct ExtractArgs {
-    archive: OsString,
-    out_dir: PathBuf,
-    overwrite: OverwritePolicy,
-    symlinks: SymlinkPolicy,
-}
-
-#[cfg(unix)]
-fn os_tail(arg: &OsStr, skip: usize) -> Option<OsString> {
-    use std::os::unix::ffi::OsStrExt;
-    Some(OsStr::from_bytes(&arg.as_bytes()[skip..]).to_os_string())
-}
-
-#[cfg(not(unix))]
-fn os_tail(arg: &OsStr, skip: usize) -> Option<OsString> {
-    arg.to_str().map(|s| OsString::from(&s[skip..]))
-}
-
-fn parse_extract_args(rest: Vec<OsString>) -> ExtractArgs {
-    let mut archive = None;
-    let mut out_dir = PathBuf::from(".");
-    let mut overwrite = None;
-    let mut yes = false;
-    let mut symlinks = SymlinkPolicy::Skip;
-    let mut switches = true;
-    for a in rest {
-        let bytes = a.as_encoded_bytes();
-        if switches && bytes.first() == Some(&b'-') && bytes.len() > 1 {
-            match bytes {
-                b"--" => switches = false,
-                b"-y" => yes = true,
-                b"-aoa" => overwrite = Some(OverwritePolicy::Overwrite),
-                b"-aos" => overwrite = Some(OverwritePolicy::Skip),
-                b"-aou" => overwrite = Some(OverwritePolicy::Rename),
-                b"-snl" => symlinks = SymlinkPolicy::Create,
-                _ if bytes.starts_with(b"-o") => {
-                    if bytes.len() == 2 {
-                        err("missing output directory", 2);
-                    }
-                    match os_tail(&a, 2) {
-                        Some(d) => out_dir = PathBuf::from(d),
-                        None => err("invalid output directory", 2),
-                    }
-                }
-                _ => err("unknown switch", 2),
-            }
-            continue;
-        }
-        if archive.is_some() {
-            err("too many arguments", 2);
-        }
-        archive = Some(a);
-    }
-    let archive = match archive {
-        Some(a) => a,
-        None => err("missing archive path", 2),
-    };
-    let overwrite = overwrite.unwrap_or(if yes { OverwritePolicy::Overwrite } else { OverwritePolicy::Error });
-    ExtractArgs { archive, out_dir, overwrite, symlinks }
-}
-
-fn last_component(path: &[u8]) -> Vec<u8> {
-    path.split(|&b| b == b'/' || b == b'\\').rfind(|c| !c.is_empty())
-        .unwrap_or(b"")
-        .to_vec()
-}
-
-/// For `e`: drop directories, keep only file names. Returns the flattened
-/// entries plus the map back to original indices.
-fn flatten(entries: &[PlannedEntry]) -> (Vec<PlannedEntry>, Vec<usize>) {
-    let mut out = Vec::new();
-    let mut map = Vec::new();
-    for (i, e) in entries.iter().enumerate() {
-        if matches!(e.kind, EntryKind::Dir) {
-            continue;
-        }
-        let mut f = e.clone();
-        f.path = last_component(&e.path);
-        if let EntryKind::Hardlink { target } = &e.kind {
-            f.kind = EntryKind::Hardlink { target: last_component(target) };
-        }
-        out.push(f);
-        map.push(i);
-    }
-    (out, map)
-}
-
-fn remap(plan: &mut Plan, map: &[usize]) {
-    for it in &mut plan.items {
-        it.index = map[it.index];
-        if let PlanKind::Hardlink { source } = &mut it.kind {
-            *source = map[*source];
-        }
-    }
-    for w in &mut plan.warnings {
-        match w {
-            PlanWarning::NonPortableName { index } => *index = map[*index],
-            PlanWarning::CaseCollision { index, other } | PlanWarning::DuplicatePath { index, other } => {
-                *index = map[*index];
-                *other = map[*other];
-            }
-        }
-    }
-}
-
-fn cmd_extract(flat: bool, rest: Vec<OsString>) {
-    let args = parse_extract_args(rest);
-    let buf = read_archive(Path::new(&args.archive), MAX_ARCHIVE);
-    let reader = open_reader(&buf, Path::new(&args.archive));
-    let entries = reader.entries();
-    let (planned, map) = if flat {
-        flatten(entries)
-    } else {
-        (entries.to_vec(), (0..entries.len()).collect())
-    };
-    let mut plan = match plan_extraction(&planned, &PlanOptions::default()) {
-        Ok(p) => p,
-        Err(f) => match f.index {
-            Some(i) => err_entry(&format!("unsafe entry rejected ({:?})", f.error), &entries[map[i]].path, EXIT_FATAL),
-            None => err_entry(&format!("archive rejected ({:?})", f.error), b"", EXIT_FATAL),
-        },
-    };
-    remap(&mut plan, &map);
-    // Flat mode neutralizes hostile directory parts; still say so.
-    let mut flattened_unsafe = false;
-    if flat {
-        for it in &plan.items {
-            if normalize_path(&entries[it.index].path, &PlanOptions::default().limits).is_err() {
-                warn("unsafe path flattened", &entries[it.index].path);
-                flattened_unsafe = true;
-            }
-        }
-    }
-    for w in &plan.warnings {
-        match *w {
-            PlanWarning::NonPortableName { index } => warn("non-portable name", &entries[index].path),
-            PlanWarning::CaseCollision { index, .. } => warn("names differ only by case", &entries[index].path),
-            PlanWarning::DuplicatePath { index, .. } => warn("duplicate name", &entries[index].path),
-        }
-    }
-    let opts = ExtractOptions { overwrite: args.overwrite, symlinks: args.symlinks, ..ExtractOptions::default() };
-    let report = match execute_plan(&plan, reader.as_ref(), &args.out_dir, &opts) {
-        Ok(r) => r,
-        Err(f) => match f.index {
-            Some(i) => err_entry(&format!("cannot extract ({:?})", f.error), &entries[i].path, EXIT_FATAL),
-            None => err_entry(&format!("cannot extract ({:?})", f.error), b"", EXIT_FATAL),
-        },
-    };
-    for &i in &report.skipped_existing {
-        warn("skipped existing", &entries[i].path);
-    }
-    for &i in &report.skipped_symlinks {
-        warn("symbolic link not extracted (use -snl)", &entries[i].path);
-    }
-    if flattened_unsafe || !report.skipped_symlinks.is_empty() {
-        process::exit(EXIT_WARNING);
     }
 }
