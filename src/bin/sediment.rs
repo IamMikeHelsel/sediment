@@ -9,7 +9,8 @@
 //!   a [switches] ARCHIVE PATHS...  create an archive (see `cli_add`)
 //!   list|test ARCHIVE         original ZIP-only commands (frozen output)
 //! Readable formats for l/t/x/e: zip, tar, gzip/bzip2/xz single streams,
-//!   tar.gz/tgz, tar.bz2/tbz2/tbz, tar.xz/txz and 7z (see `archive_open`).
+//!   tar.gz/tgz, tar.bz2/tbz2/tbz, tar.xz/txz and 7z (see `archive_open`),
+//!   zstd single streams, tar.zst/tzst and WIM (see `archive_open_ext`).
 //! Switches for x/e: -o<dir> output directory, -y assume yes (overwrite),
 //!   -aoa overwrite all, -aos skip existing, -aou auto-rename new files,
 //!   -snl create symbolic links (default: skip them with a warning),
@@ -23,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use sediment_engine::archive_name::escape_name;
-use sediment_engine::archive_open::open_named;
+use sediment_engine::archive_open_ext::open_named_ext;
 use sediment_engine::archive_reader::{ArchiveReader, ReaderError, ReaderLimits};
 use sediment_engine::cli_add::run_add;
 use sediment_engine::extract_fs::{execute_plan, ExtractOptions, OverwritePolicy, SymlinkPolicy};
@@ -213,7 +214,7 @@ fn file_name_bytes(p: &Path) -> Vec<u8> {
 }
 
 fn open_reader<'a>(buf: &'a [u8], path: &Path) -> Box<dyn ArchiveReader + 'a> {
-    match open_named(buf, &file_name_bytes(path), ReaderLimits::default()) {
+    match open_named_ext(buf, &file_name_bytes(path), ReaderLimits::default()) {
         Ok(r) => r,
         Err(ReaderError::Unsupported) => err("unsupported archive format", EXIT_FATAL),
         Err(ReaderError::CrcMismatch) => err("data error (checksum mismatch)", EXIT_FATAL),

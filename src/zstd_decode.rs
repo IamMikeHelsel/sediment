@@ -431,8 +431,7 @@ struct HuffTable {
 fn read_huffman_tree(b: &[u8]) -> R<(HuffTable, usize)> {
     let header = *b.first().ok_or(ZstdError::Corrupt)?;
     let mut weights: Vec<u8> = Vec::with_capacity(256);
-    let used;
-    if header >= 128 {
+    let used = if header >= 128 {
         let n = usize::from(header) - 127;
         let nbytes = n.div_ceil(2);
         let data = b.get(1..1 + nbytes).ok_or(ZstdError::Corrupt)?;
@@ -440,7 +439,7 @@ fn read_huffman_tree(b: &[u8]) -> R<(HuffTable, usize)> {
             let byte = data[i / 2];
             weights.push(if i % 2 == 0 { byte >> 4 } else { byte & 15 });
         }
-        used = 1 + nbytes;
+        1 + nbytes
     } else {
         let size = usize::from(header);
         let data = b.get(1..1 + size).ok_or(ZstdError::Corrupt)?;
@@ -479,8 +478,8 @@ fn read_huffman_tree(b: &[u8]) -> R<(HuffTable, usize)> {
         if weights.len() > 255 {
             return Err(ZstdError::Corrupt);
         }
-        used = 1 + size;
-    }
+        1 + size
+    };
     Ok((build_huffman(&weights)?, used))
 }
 
@@ -952,20 +951,20 @@ pub fn decode_frame_into(input: &[u8], out: &mut Vec<u8>, max_output: usize) -> 
             }
             _ => return Err(ZstdError::InvalidBlock),
         }
-        if let Some(cs) = h.content_size {
-            if (out.len() - frame_start) as u64 > cs {
-                return Err(ZstdError::SizeMismatch);
-            }
+        if let Some(cs) = h.content_size
+            && (out.len() - frame_start) as u64 > cs
+        {
+            return Err(ZstdError::SizeMismatch);
         }
         if last {
             break;
         }
     }
     let produced = &out[frame_start..];
-    if let Some(cs) = h.content_size {
-        if produced.len() as u64 != cs {
-            return Err(ZstdError::SizeMismatch);
-        }
+    if let Some(cs) = h.content_size
+        && produced.len() as u64 != cs
+    {
+        return Err(ZstdError::SizeMismatch);
     }
     if h.has_checksum {
         let stored = read_u32(input, pos).ok_or(ZstdError::Truncated)?;

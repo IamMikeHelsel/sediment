@@ -47,6 +47,10 @@ pub enum ArchiveFormat {
     Xz,
     Bzip2,
     SevenZ,
+    /// Zstandard single stream (`.zst`); see `archive_open_ext`.
+    Zstd,
+    /// Windows Imaging (`.wim`); see `archive_open_ext`.
+    Wim,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
