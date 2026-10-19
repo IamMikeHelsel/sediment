@@ -1,0 +1,10 @@
+D	0	00000000	src
+F	936	fc43a3cf	src/main.c
+F	376	23fa3e48	src/util.c
+F	700	67b54113	src/old.o
+L	0	00000000	src/link	main.c
+H	0	00000000	src/hard	src/main.c
+F	12	adcc11df	README
+F	152	a39f0bd4	deep/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.txt
+L	0	00000000	longlink	deep/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.txt
+F	0	00000000	empty

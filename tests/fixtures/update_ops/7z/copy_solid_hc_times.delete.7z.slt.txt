@@ -1,0 +1,97 @@
+----------
+Path = dir
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Created = 2026-10-19 21:03:51.8958834
+Accessed = 2026-10-19 21:03:51.8988834
+Attributes = D drwxr-xr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = dir/sub
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Created = 2026-10-19 21:03:51.8958834
+Accessed = 2026-10-19 21:03:51.8988834
+Attributes = D drwxrwxr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = emptydir
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Created = 2026-10-19 21:03:51.8958834
+Accessed = 2026-10-19 21:03:51.8988834
+Attributes = D drwxrwxr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = empty.txt
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Created = 2026-10-19 21:03:51.8958834
+Accessed = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-rw-r--
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = b.bin
+Size = 700
+Packed Size = 700
+Modified = 2024-03-05 06:07:08.1234567
+Created = 2026-10-19 21:03:51.8958834
+Accessed = 2026-10-19 21:04:59.5138566
+Attributes = A -rw-rw-r--
+CRC = 67C52D4F
+Encrypted = -
+Method = Copy
+Block = 0
+
+Path = dir/sub/nested.txt
+Size = 7
+Packed Size = 7
+Modified = 2024-03-05 06:07:08.1234567
+Created = 2026-10-19 21:03:51.8958834
+Accessed = 2026-10-19 21:04:59.5138566
+Attributes = A -rw-rw-r--
+CRC = EBAB958D
+Encrypted = -
+Method = Copy
+Block = 1
+
+Path = hello.txt
+Size = 11
+Packed Size = 11
+Modified = 2024-03-05 06:07:08.1234567
+Created = 2026-10-19 21:03:51.8958834
+Accessed = 2026-10-19 21:04:16.2408736
+Attributes = A -rw-r-----
+CRC = 99504610
+Encrypted = -
+Method = Copy
+Block = 2
+
+Path = héllo_日本.txt
+Size = 13
+Packed Size = 13
+Modified = 2024-03-05 06:07:08.1234567
+Created = 2026-10-19 21:03:51.8958834
+Accessed = 2026-10-19 21:04:59.5138566
+Attributes = A -rw-rw-r--
+CRC = 6C14D048
+Encrypted = -
+Method = Copy
+Block = 3
+

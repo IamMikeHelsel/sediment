@@ -1,0 +1,101 @@
+----------
+Path = dir
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = D drwxr-xr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = dir/sub
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = D drwxrwxr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = emptydir
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = D drwxrwxr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = empty.txt
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-rw-r--
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = b.bin
+Size = 700
+Packed Size = 296
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-rw-r--
+CRC = 67C52D4F
+Encrypted = -
+Method = LZMA2:12
+Block = 0
+
+Path = dir/sub/nested.txt
+Size = 7
+Packed Size = 
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-rw-r--
+CRC = EBAB958D
+Encrypted = -
+Method = LZMA2:12
+Block = 0
+
+Path = hello.txt
+Size = 11
+Packed Size = 
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-r-----
+CRC = 99504610
+Encrypted = -
+Method = LZMA2:12
+Block = 0
+
+Path = héllo_日本.txt
+Size = 13
+Packed Size = 
+Modified = 2024-03-05 06:07:08.1234567
+Attributes = A -rw-rw-r--
+CRC = 6C14D048
+Encrypted = -
+Method = LZMA2:12
+Block = 0
+
+Path = a.txt
+Size = 12
+Packed Size = 
+Modified = 2033-05-18 03:33:20.0000000
+Attributes = A -rw-r--r--
+CRC = A48A7BE9
+Encrypted = -
+Method = LZMA2:12
+Block = 0
+
+Path = zz/new.txt
+Size = 4
+Packed Size = 
+Modified = 1970-01-01 00:00:01.0000000
+Attributes = A -rw-r--r--
+CRC = 340A50C8
+Encrypted = -
+Method = LZMA2:12
+Block = 0
+

@@ -9,6 +9,9 @@
 //!   a [switches] ARCHIVE PATHS...  create an archive (see `cli_add`)
 //!   h [-scrc<METHOD>]... PATHS...  hash files (see `cli_hash`)
 //!   b [ITERATIONS] [switches]      benchmark (see `cli_bench`)
+//!   u [switches] ARCHIVE PATHS...  add new / replace newer files (see `cli_update`)
+//!   d [-r] ARCHIVE PATTERNS...     delete entries by wildcard (see `cli_update`)
+//!   rn ARCHIVE OLD NEW [OLD NEW...] rename entries (see `cli_update`)
 //!   list|test ARCHIVE         original ZIP-only commands (frozen output)
 //! Readable formats for l/t/x/e: zip, tar, gzip/bzip2/xz single streams,
 //!   tar.gz/tgz, tar.bz2/tbz2/tbz, tar.xz/txz, 7z, cpio, ar, deb, rpm and
@@ -48,6 +51,7 @@ use sediment_engine::cli_stdio::{
 };
 use sediment_engine::volume_io::{VolumeError, first_volume_base, read_volumes};
 use sediment_engine::cli_crypt::{CryptSwitches, add_needs_crypt, run_add_crypt, take_crypt_switches};
+use sediment_engine::cli_update::{run_delete, run_rename, run_update};
 use sediment_engine::extract_fs::{execute_plan, ExtractOptions, OverwritePolicy, SymlinkPolicy};
 use sediment_engine::extract_plan::{
     normalize_path, plan_extraction, EntryKind, Plan, PlanKind, PlanOptions, PlanWarning, PlannedEntry,
@@ -129,6 +133,12 @@ fn main() {
         process::exit(run_hash(&rest));
     } else if cmd == "b" {
         process::exit(run_bench(&rest));
+    } else if cmd == "u" {
+        process::exit(run_update(&rest));
+    } else if cmd == "d" {
+        process::exit(run_delete(&rest));
+    } else if cmd == "rn" {
+        process::exit(run_rename(&rest));
     } else {
         err("unknown command", 2);
     }
