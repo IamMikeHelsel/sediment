@@ -2,7 +2,9 @@
 //! One entry point that opens any supported container as an
 //! [`ArchiveReader`]: ZIP, tar (ustar/GNU/pax/v7), single-stream gzip,
 //! bzip2 and xz files, tar inside gzip/bzip2/xz (`.tar.gz`, `.tgz`,
-//! `.tar.bz2`, `.tbz2`, `.tbz`, `.tar.xz`, `.txz`), and 7z.
+//! `.tar.bz2`, `.tbz2`, `.tbz`, `.tar.xz`, `.txz`), 7z, and the Unix
+//! formats cpio (also `.cpio.gz`/`.cpio.bz2`/`.cpio.xz`), ar, Debian
+//! packages, RPM packages and xar.
 //!
 //! Format detection is by magic bytes ([`crate::archive_detect`]); the
 //! archive's file name only decides whether a decompressed stream is a tar
@@ -22,7 +24,11 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 
+use crate::ar_archive::{ArReader, DebReader, is_deb};
 use crate::archive_detect::{ArchiveFormat as Detected, detect_format};
+use crate::cpio_archive::{CpioReader, looks_like_cpio};
+use crate::rpm_archive::RpmReader;
+use crate::xar_archive::XarReader;
 use crate::archive_reader::{ArchiveFormat, ArchiveReader, ReaderError, ReaderLimits, ZipReader};
 use crate::bzip2_decode::{Bzip2DecodeError, decode_bzip2};
 use crate::deflate64::inflate64_raw_prefix;
@@ -660,11 +666,19 @@ pub fn open_named<'a>(
             if is_compressed_tar_name(archive_name) || ends_with_ci(&member, b".tar") {
                 return Ok(Box::new(TarReader::new(Cow::Owned(data), limits)?));
             }
+            if ends_with_ci(&member, b".cpio") && looks_like_cpio(&data) {
+                return Ok(Box::new(CpioReader::new(Cow::Owned(data), limits)?));
+            }
             if data.len() as u64 > limits.max_entry_size {
                 return Err(ReaderError::LimitExceeded);
             }
             Ok(Box::new(StreamReader::new(format, member, data, mtime, crc)))
         }
+        Detected::Cpio => Ok(Box::new(CpioReader::new(Cow::Borrowed(bytes), limits)?)),
+        Detected::Ar if is_deb(bytes) => Ok(Box::new(DebReader::new(bytes, limits)?)),
+        Detected::Ar => Ok(Box::new(ArReader::new(bytes, limits)?)),
+        Detected::Rpm => Ok(Box::new(RpmReader::new(bytes, limits)?)),
+        Detected::Xar => Ok(Box::new(XarReader::new(bytes, limits)?)),
         Detected::LzmaAlone | Detected::Unknown => Err(ReaderError::Unsupported),
     }
 }

@@ -47,6 +47,16 @@ pub enum ArchiveFormat {
     Xz,
     Bzip2,
     SevenZ,
+    /// cpio (newc/crc/odc/binary).
+    Cpio,
+    /// Unix ar archive.
+    Ar,
+    /// Debian binary package (ar of control/data tarballs).
+    Deb,
+    /// RPM package (cpio payload).
+    Rpm,
+    /// xar archive.
+    Xar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

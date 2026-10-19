@@ -78,3 +78,8 @@ pub mod lzma_encode;
 pub mod lzma2_encode;
 pub mod xz_encode;
 pub mod archive_open;
+pub mod cpio_archive;
+pub mod ar_archive;
+pub mod rpm_archive;
+pub mod xml_mini;
+pub mod xar_archive;
