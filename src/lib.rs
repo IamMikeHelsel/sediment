@@ -88,3 +88,6 @@ pub mod cli_add_7z;
 pub mod archive_update;
 pub mod zip_update;
 pub mod tar_update;
+pub mod sevenz_update;
+pub mod archive_edit;
+pub mod cli_update;
