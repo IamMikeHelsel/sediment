@@ -353,7 +353,7 @@ fn encode_block(w: &mut MsbWriter, block: &[u8]) -> R<()> {
     {
         let mut lo = 0usize;
         let mut remaining = n_mtf as u64;
-        for g in 0..n_groups {
+        for (g, table) in lens.iter_mut().enumerate() {
             let parts_left = (n_groups - g) as u64;
             let target = remaining / parts_left;
             let mut acc = 0u64;
@@ -368,8 +368,8 @@ fn encode_block(w: &mut MsbWriter, block: &[u8]) -> R<()> {
                     hi += 1;
                 }
             }
-            for s in 0..alpha {
-                lens[g][s] = if (lo..hi).contains(&s) { 1 } else { 15 };
+            for (s, l) in table.iter_mut().enumerate().take(alpha) {
+                *l = if (lo..hi).contains(&s) { 1 } else { 15 };
             }
             remaining = remaining.saturating_sub(acc);
             lo = hi;

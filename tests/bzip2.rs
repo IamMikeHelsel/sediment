@@ -62,6 +62,7 @@ fn piece(spec: &str) -> Vec<u8> {
 struct Case {
     file: String,
     levels: Vec<u8>,
+    streams: Vec<Vec<u8>>,
     input: Vec<u8>,
 }
 
@@ -77,15 +78,14 @@ fn cases() -> Vec<Case> {
         .map(|line| {
             let (file, desc) = line.split_once(' ').unwrap();
             let mut levels = Vec::new();
-            let mut input = Vec::new();
+            let mut streams = Vec::new();
             for st in desc.split(';') {
                 let (lv, pieces) = st.split_once(':').unwrap();
                 levels.push(lv.parse().unwrap());
-                for p in pieces.split(',') {
-                    input.extend(piece(p));
-                }
+                streams.push(pieces.split(',').flat_map(piece).collect::<Vec<u8>>());
             }
-            Case { file: file.to_string(), levels, input }
+            let input = streams.concat();
+            Case { file: file.to_string(), levels, streams, input }
         })
         .collect()
 }
@@ -109,8 +109,14 @@ fn decodes_python_fixtures() {
 fn rust_encoded_fixtures_match_and_roundtrip() {
     let regen = std::env::var_os("BZIP2_REGEN").is_some();
     for c in cases() {
-        let enc = encode_bzip2(&c.input, c.levels[0], usize::MAX).unwrap();
-        assert_eq!(&enc[..4], &[b'B', b'Z', b'h', b'0' + c.levels[0]]);
+        // One Rust-encoded stream per manifest stream, concatenated.
+        let mut enc = Vec::new();
+        for (data, &level) in c.streams.iter().zip(&c.levels) {
+            let one = encode_bzip2(data, level, usize::MAX).unwrap();
+            assert_eq!(&one[..4], &[b'B', b'Z', b'h', b'0' + level]);
+            assert_eq!(decode_bzip2(&one, usize::MAX).unwrap(), *data, "{}", c.file);
+            enc.extend(one);
+        }
         assert_eq!(decode_bzip2(&enc, usize::MAX).unwrap(), c.input, "{}", c.file);
         let path = dir().join(format!("rust_{}", c.file));
         if regen {
@@ -151,8 +157,16 @@ fn malformed_fixtures_rejected() {
 fn every_truncation_errors() {
     for name in ["run_mix.bz2", "multi_stream.bz2", "one_byte.bz2", "empty_l9.bz2"] {
         let data = read(name);
+        let full = decode_bzip2(&data, usize::MAX).unwrap();
         for len in 0..data.len() {
-            assert!(decode_bzip2(&data[..len], usize::MAX).is_err(), "{name} len {len}");
+            match decode_bzip2(&data[..len], usize::MAX) {
+                Err(_) => {}
+                // Cutting exactly at a stream boundary leaves valid streams.
+                Ok(out) => assert!(
+                    name == "multi_stream.bz2" && out.len() < full.len() && full.starts_with(&out),
+                    "{name} len {len}"
+                ),
+            }
         }
     }
 }
@@ -226,7 +240,7 @@ fn encoder_block_boundaries() {
     }
     let mut input = Vec::new();
     let mut s = 5u32;
-    while input.len() < 2_000_000 {
+    while input.len() < 700_000 {
         s = lcg(s);
         let b = (s >> 16) as u8;
         s = lcg(s);
@@ -265,4 +279,11 @@ fn concatenated_rust_streams() {
     let c = encode_bzip2(b"second", 1, usize::MAX).unwrap();
     let all = [a, b, c].concat();
     assert_eq!(decode_bzip2(&all, usize::MAX).unwrap(), b"first stream second");
+}
+
+#[test]
+fn encoder_full_900k_block() {
+    let input = piece("lcg.42.950000");
+    let enc = encode_bzip2(&input, 9, usize::MAX).unwrap();
+    assert_eq!(decode_bzip2(&enc, usize::MAX).unwrap(), input);
 }
