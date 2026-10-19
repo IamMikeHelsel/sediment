@@ -98,8 +98,8 @@ fn wrong_or_missing_password_exits_2() {
     let o = run(&["l", "-pnope", &fixture("aes_hdr.7z")]);
     assert_eq!(o.status.code(), Some(2));
     assert!(stderr(&o).contains("Wrong password?"));
-    // A bare -p (interactive prompt in 7-Zip) is refused.
-    assert_eq!(run(&["t", "-p", &fixture("aes_hdr.7z")]).status.code(), Some(2));
+    // A bare -p (interactive prompt in 7-Zip) is refused as a command line error (7).
+    assert_eq!(run(&["t", "-p", &fixture("aes_hdr.7z")]).status.code(), Some(7));
 }
 
 #[test]
@@ -176,13 +176,14 @@ fn add_switch_errors() {
         a.push(src.clone());
         let refs: Vec<&str> = a.iter().map(|s| s.as_str()).collect();
         let o = run(&refs);
-        assert_eq!(o.status.code(), Some(2), "{args:?}: {}", stderr(&o));
+        // Command line errors use 7-Zip's exit code 7 (see cli_compat).
+        assert_eq!(o.status.code(), Some(7), "{args:?}: {}", stderr(&o));
         assert!(!Path::new(&a[a.len() - 2]).exists(), "{args:?} wrote an archive");
     }
     // An existing archive is not overwritten without -y.
     let arc = d.path("keep.7z");
     fs::write(&arc, b"x").unwrap();
-    assert_eq!(run(&["a", "-psecret", &arc, &src]).status.code(), Some(1));
+    assert_eq!(run(&["a", "-psecret", &arc, &src]).status.code(), Some(2));
     assert_eq!(fs::read(&arc).unwrap(), b"x");
     assert_eq!(run(&["a", "-psecret", "-y", &arc, &src]).status.code(), Some(0));
     // Unencrypted 7z creation is routed to the 7z writer too.

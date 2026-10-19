@@ -173,7 +173,7 @@ fn si_stdin_limit_is_enforced() {
         assert_clean_fail(&o, 2);
     }
     let o = run_in(&["a", "-si", "-so", "-tgz"], &input, &[("SEDIMENT_STDIN_LIMIT", "1k")]);
-    assert_clean_fail(&o, 1);
+    assert_clean_fail(&o, 2); // fatal: 7-Zip exit code 2 (cli_compat)
     assert!(o.stdout.is_empty());
 }
 
@@ -208,21 +208,23 @@ fn si_malformed_input_fails_cleanly() {
 fn stdio_usage_errors() {
     let p = fx("payload.bin.gz");
     let ps = p.to_str().unwrap();
-    for args in [
-        &["x", "-si", ps][..],
-        &["l", "-si", ps],
-        &["t", "-zz", ps],
-        &["l"],
-        &["a", "-so", "-v1k", "o.tar", ps],
-        &["a", "-an", "o.tar", ps],
-        &["a", "-so", "-an", ps],
-        &["a", "-si", "o.tar", ps],
-        &["a", "-v0", "o.tar", ps],
-        &["a", "-vx", "o.tar", ps],
-        &["a", "-tbogus", "-so", "-an", ps],
+    // 7-Zip exit codes (cli_compat): 7 = command line error, 2 = fatal.
+    // With -si the positional of x/l is a member name, so empty stdin is fatal.
+    for (args, code) in [
+        (&["x", "-si", ps][..], 2),
+        (&["l", "-si", ps], 2),
+        (&["t", "-zz", ps], 7),
+        (&["l"], 7),
+        (&["a", "-so", "-v1k", "o.tar", ps], 7),
+        (&["a", "-an", "o.tar", ps], 7),
+        (&["a", "-so", "-an", ps], 7),
+        (&["a", "-si", "o.tar", ps], 7),
+        (&["a", "-v0", "o.tar", ps], 7),
+        (&["a", "-vx", "o.tar", ps], 7),
+        (&["a", "-tbogus", "-so", "-an", ps], 7),
     ] {
         let o = run(args);
-        assert_clean_fail(&o, 2);
+        assert_clean_fail(&o, code);
     }
 }
 
@@ -355,7 +357,7 @@ fn create_volumes_multiple_sizes_and_units() {
     let data: Vec<u8> = (0..5000u32).map(|i| (i * 7919 % 251) as u8).collect();
     let arc = t.join("d.tar");
     let o = run_in(&["a".as_ref(), "-v1k".as_ref(), "-v2K".as_ref(), arc.as_os_str()], &[], &[]);
-    assert_clean_fail(&o, 2); // missing inputs
+    assert_clean_fail(&o, 7); // missing inputs: command line error (7-Zip code 7)
     let o = run_in(&["a".as_ref(), "-sid.bin".as_ref(), "-v1k".as_ref(), "-v2K".as_ref(), arc.as_os_str()], &data, &[]);
     ok(&o);
     let vols = volumes_of(&t.0, "d.tar");
@@ -378,7 +380,7 @@ fn create_volumes_refuses_and_overwrites_existing() {
     assert!(n_before >= 5);
     // Without -y nothing is touched.
     let o = run_in(&["a".as_ref(), "-si".as_ref(), "-v4k".as_ref(), arc.as_os_str()], b"tiny", &[]);
-    assert_clean_fail(&o, 1);
+    assert_clean_fail(&o, 2); // fatal: 7-Zip exit code 2
     assert_eq!(volumes_of(&t.0, "v.gz").len(), n_before);
     // With -y the shorter set replaces the old one and the stale tail goes.
     let o = run_in(&["a".as_ref(), "-si".as_ref(), "-y".as_ref(), "-v4k".as_ref(), arc.as_os_str()], b"tiny", &[]);
@@ -421,7 +423,7 @@ fn si_named_member_in_tar_file() {
     assert!(text(&l.stdout).ends_with("10\t--------\tnotes.txt\n"), "{}", text(&l.stdout));
     // Unsafe -si names are rejected by the container writer.
     let o = run_in(&["a".as_ref(), "-si../x".as_ref(), t.join("bad.tar").as_os_str()], b"x", &[]);
-    assert_clean_fail(&o, 1);
+    assert_clean_fail(&o, 2); // fatal: 7-Zip exit code 2
     assert!(!t.join("bad.tar").exists());
 }
 
@@ -470,7 +472,7 @@ fn single_stream_from_path_with_so_and_volumes() {
     assert_eq!(x.stdout, fx_bytes("payload.bin"));
     // Single streams take exactly one regular file.
     let o = run(&["a".as_ref(), "-so".as_ref(), "p.gz".as_ref(), fx("payload.bin").as_os_str(), fx("hello.txt").as_os_str()]);
-    assert_clean_fail(&o, 1);
+    assert_clean_fail(&o, 2); // fatal: 7-Zip exit code 2
     let o = run(&["a".as_ref(), "-so".as_ref(), "p.gz".as_ref(), t.0.as_os_str()]);
-    assert_clean_fail(&o, 1);
+    assert_clean_fail(&o, 2); // fatal: 7-Zip exit code 2
 }

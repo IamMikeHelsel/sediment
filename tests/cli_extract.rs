@@ -97,9 +97,11 @@ fn new_commands_fatal_is_2() {
     assert_eq!(o.status.code(), Some(2));
     assert_eq!(stderr(&o), "sediment: unsupported archive format\n");
     assert_eq!(run(&["l", "/nonexistent/x.zip"]).status.code(), Some(2));
-    assert_eq!(run(&["x"]).status.code(), Some(2));
-    assert_eq!(run(&["x", "-q", "a.zip"]).status.code(), Some(2));
-    assert_eq!(run(&["x", "-o", "a.zip"]).status.code(), Some(2));
+    // Command line errors use 7-Zip's exit code 7 (see cli_compat).
+    assert_eq!(run(&["x"]).status.code(), Some(7));
+    assert_eq!(run(&["x", "-q", "a.zip"]).status.code(), Some(7));
+    assert_eq!(run(&["x", "-o", "a.zip"]).status.code(), Some(7));
+    // Extra names are member wildcards; the missing archive is fatal.
     assert_eq!(run(&["x", "a.zip", "b.zip"]).status.code(), Some(2));
 }
 

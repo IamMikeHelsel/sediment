@@ -1,0 +1,10 @@
+Path = hello.txt
+Size = 11
+Packed Size = 11
+Modified = 2023-11-14 22:13:20.1234567
+Attributes = A -rw-r-----
+CRC = 99504610
+Encrypted = -
+Method = Copy
+Block = 0
+
