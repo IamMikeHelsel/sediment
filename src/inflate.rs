@@ -17,6 +17,19 @@ pub enum InflateError {
 }
 
 pub fn inflate_raw(input: &[u8], max_output: usize, max_blocks: usize) -> Result<Vec<u8>, InflateError> {
+    let (output, consumed) = inflate_raw_prefix(input, max_output, max_blocks)?;
+    if consumed != input.len() {
+        return Err(InflateError::TrailingData);
+    }
+    Ok(output)
+}
+
+/// Decode one raw DEFLATE stream (RFC 1951) from the start of `input`,
+/// stopping after the final block. Returns the output and the number of
+/// input bytes consumed (the final block is padded to a byte boundary), so
+/// containers that place data after the stream (gzip members, ZIP entries)
+/// can continue from there.
+pub fn inflate_raw_prefix(input: &[u8], max_output: usize, max_blocks: usize) -> Result<(Vec<u8>, usize), InflateError> {
     let mut reader = BitReader::new(input).map_err(|_| InflateError::LimitExceeded)?;
     let mut output = Vec::new();
     let mut block_count: usize = 0;
@@ -135,9 +148,6 @@ pub fn inflate_raw(input: &[u8], max_output: usize, max_blocks: usize) -> Result
     }
 
     reader.align_byte();
-    if reader.remaining() != 0 {
-        return Err(InflateError::TrailingData);
-    }
-
-    Ok(output)
+    let consumed = (reader.position() / 8).min(input.len());
+    Ok((output, consumed))
 }

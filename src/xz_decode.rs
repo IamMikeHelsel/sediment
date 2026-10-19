@@ -7,10 +7,16 @@
 //! stream header/footer, block header and filter flags, the index, stream
 //! padding and check types; FIPS 180-4 for SHA-256.
 //!
-//! Supported: filter chains consisting of exactly one LZMA2 filter; check
-//! types None, CRC32, CRC64 and SHA-256. BCJ/delta and other filters return
-//! `XzError::Unsupported`.
+//! Supported: filter chains ending in LZMA2, optionally preceded by up to
+//! three Delta (0x03) and BCJ (x86 0x04, PowerPC 0x05, IA-64 0x06, ARM
+//! 0x07, ARM-Thumb 0x08, SPARC 0x09, ARM64 0x0A, RISC-V 0x0B) filters
+//! (xz spec 5.3.2/5.3.3, "Filter Flags" and "Branch/Call/Jump Filters");
+//! check types None, CRC32, CRC64 and SHA-256. Other filters return
+//! `XzError::Unsupported`. Pre-filters are undone per block, in reverse
+//! chain order, after LZMA2 decoding (each block starts fresh filter state).
 
+use crate::filter_bcj::{BcjArch, bcj_convert_in_place, parse_bcj_properties};
+use crate::filter_delta::{DeltaCoder, parse_delta_properties};
 use crate::lzma2_decode::{Lzma2Error, decode_lzma2_into, dictionary_size_from_byte};
 use crate::xz_stream::{self, CheckId, XzStreamError};
 use crate::xz_vli::decode_vli;
@@ -56,6 +62,7 @@ impl From<XzStreamError> for XzError {
 
 const HEADER_MAGIC: [u8; 6] = [0xFD, b'7', b'z', b'X', b'Z', 0x00];
 const FILTER_LZMA2: u64 = 0x21;
+const FILTER_DELTA: u64 = 0x03;
 
 /// Decode a complete `.xz` file (single or concatenated streams with stream
 /// padding). `max_dictionary` caps the LZMA2 dictionary size declared by any
@@ -129,6 +136,18 @@ fn decode_stream(input: &[u8], max_dict: u64, out: &mut Vec<u8>, max_output: usi
             && c != compressed
         {
             return Err(XzError::InvalidData);
+        }
+        // Undo the pre-filters, last in the chain first.
+        for f in info.filters[..info.num_pre].iter().rev() {
+            let buf = &mut out[data_start..];
+            match *f {
+                PreFilter::Delta(distance) => {
+                    DeltaCoder::new(distance, false).map_err(|_| XzError::InvalidHeader)?.convert(buf);
+                }
+                PreFilter::Bcj(arch, start) => {
+                    bcj_convert_in_place(arch, start, buf, false).map_err(|_| XzError::InvalidHeader)?;
+                }
+            }
         }
         let produced = (out.len() - data_start) as u64;
         if let Some(u) = info.uncompressed
@@ -207,10 +226,19 @@ fn vli(bytes: &[u8]) -> Result<(u64, usize), XzError> {
     })
 }
 
+#[derive(Clone, Copy)]
+enum PreFilter {
+    Delta(usize),
+    Bcj(BcjArch, u32),
+}
+
 struct BlockInfo {
     compressed: Option<u64>,
     uncompressed: Option<u64>,
     dict_size: u32,
+    /// Non-last filters in chain order; only the first `num_pre` are used.
+    filters: [PreFilter; 3],
+    num_pre: usize,
 }
 
 fn parse_block_header(bh: &[u8], max_dict: u64) -> Result<BlockInfo, XzError> {
@@ -243,14 +271,31 @@ fn parse_block_header(bh: &[u8], max_dict: u64) -> Result<BlockInfo, XzError> {
     let uncompressed = if flags & 0x80 != 0 { Some(hv(&mut p)?) } else { None };
 
     let mut dict_size = None;
+    let mut filters = [PreFilter::Delta(1); 3];
+    let mut num_pre = 0usize;
     for i in 0..num_filters {
         let id = hv(&mut p)?;
         let props_len = hv(&mut p)?;
         let props_len = usize::try_from(props_len).map_err(|_| XzError::InvalidHeader)?;
         let props = body.get(p..p.checked_add(props_len).ok_or(XzError::InvalidHeader)?).ok_or(XzError::InvalidHeader)?;
         p += props_len;
-        if id != FILTER_LZMA2 || i != num_filters - 1 {
-            // Delta (0x03), BCJ family (0x04..=0x0B) and anything else.
+        if i != num_filters - 1 {
+            // A non-last filter: Delta or one of the BCJ family.
+            let f = if id == FILTER_DELTA {
+                PreFilter::Delta(parse_delta_properties(props).map_err(|_| XzError::InvalidHeader)?)
+            } else if let Ok(arch) = BcjArch::from_xz_filter_id(id) {
+                PreFilter::Bcj(arch, parse_bcj_properties(arch, props).map_err(|_| XzError::InvalidHeader)?)
+            } else if id == FILTER_LZMA2 {
+                // LZMA2 may only be the last filter.
+                return Err(XzError::InvalidHeader);
+            } else {
+                return Err(XzError::Unsupported);
+            };
+            filters[num_pre] = f;
+            num_pre += 1;
+            continue;
+        }
+        if id != FILTER_LZMA2 {
             return Err(XzError::Unsupported);
         }
         if props_len != 1 {
@@ -265,7 +310,7 @@ fn parse_block_header(bh: &[u8], max_dict: u64) -> Result<BlockInfo, XzError> {
     if body[p..].iter().any(|&b| b != 0) {
         return Err(XzError::InvalidHeader);
     }
-    Ok(BlockInfo { compressed, uncompressed, dict_size: dict_size.ok_or(XzError::InvalidHeader)? })
+    Ok(BlockInfo { compressed, uncompressed, dict_size: dict_size.ok_or(XzError::InvalidHeader)?, filters, num_pre })
 }
 
 fn check_size(check: CheckId) -> usize {
