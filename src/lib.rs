@@ -19,3 +19,5 @@ pub mod huffman_decode;
 pub mod inflate;
 pub mod deflate_dynamic;
 pub mod zip_decode;
+pub mod zlib_wrapper;
+pub mod gzip_wrapper;
