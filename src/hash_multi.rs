@@ -191,6 +191,17 @@ impl Digest {
         Digest { method, bytes: [0; MAX_DIGEST_LEN] }
     }
 
+    /// Build a digest from raw bytes (little-endian for numeric checksums).
+    /// Returns `None` unless `bytes.len() == method.digest_len()`.
+    pub fn from_bytes(method: HashMethod, bytes: &[u8]) -> Option<Digest> {
+        if bytes.len() != method.digest_len() {
+            return None;
+        }
+        let mut d = Digest::zero(method);
+        d.bytes[..bytes.len()].copy_from_slice(bytes);
+        Some(d)
+    }
+
     pub fn method(&self) -> HashMethod {
         self.method
     }

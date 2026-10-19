@@ -1,0 +1,19 @@
+CRC32             Size  Name
+-------- -------------  ------------
+                        tree
+3B41C9E6          1000  tree/B upper.txt
+363A3020             6  tree/a.txt
+00000000             0  tree/empty.bin
+                        tree/sub
+244F5635         70000  tree/sub/data.bin
+                        tree/sub/deeper
+414FA339            43  tree/sub/deeper/z.txt
+-------- -------------  ------------
+D71AF374         71049
+
+Folders: 3
+Files: 5
+Size: 71049
+
+CRC32  for data:              D71AF374
+CRC32  for data and names:    6616D8C8
