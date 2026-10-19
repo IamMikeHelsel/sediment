@@ -83,7 +83,9 @@ fn lim() -> SevenZLimits {
 }
 
 /// Open with the in-tree reader and return `(name, is_dir, data, attributes, mtime)`.
-fn read_back(bytes: &[u8]) -> Vec<(String, bool, Vec<u8>, Option<u32>, Option<u64>)> {
+type ReadBack = (String, bool, Vec<u8>, Option<u32>, Option<u64>);
+
+fn read_back(bytes: &[u8]) -> Vec<ReadBack> {
     let ar = SevenZArchive::open(bytes, &Dec, lim()).expect("open");
     ar.entries()
         .iter()
@@ -128,7 +130,7 @@ fn x86_like(n: usize) -> Vec<u8> {
     let mut i = 0u32;
     while v.len() < n {
         v.extend_from_slice(&[0x55, 0x48, 0x89, 0xe5]);
-        v.push(if i % 3 == 0 { 0xe9 } else { 0xe8 });
+        v.push(if i.is_multiple_of(3) { 0xe9 } else { 0xe8 });
         let target = 0x1000u32.wrapping_add((i % 17) * 64).wrapping_sub(v.len() as u32 + 4);
         v.extend_from_slice(&target.to_le_bytes());
         v.extend_from_slice(&[0x90, 0xc3]);
@@ -211,7 +213,7 @@ fn check_fixture_contents(bytes: &[u8]) {
         let want: &[u8] = if o.kind == EntryKind::Symlink { &o.link } else { &o.data };
         assert_eq!(g.2, want, "{}", o.name);
         assert_eq!(g.3, Some(unix_attributes(o.kind, o.mode)), "{}", o.name);
-        assert_eq!(g.4.map(|t| filetime_to_unix(t)), Some((MTIME, 0)));
+        assert_eq!(g.4.map(filetime_to_unix), Some((MTIME, 0)));
     }
 }
 
@@ -239,7 +241,9 @@ fn committed_fixtures_are_reproduced_byte_for_byte() {
 // 7zz l -slt comparison
 // ---------------------------------------------------------------------------
 
-fn slt_items(s: &str) -> (Vec<(String, String)>, Vec<Vec<(String, String)>>) {
+type Kv = Vec<(String, String)>;
+
+fn slt_items(s: &str) -> (Kv, Vec<Kv>) {
     let mut parts = s.split("\n----------\n");
     let head = parts.next().unwrap();
     let body = parts.next().expect("slt item section");
@@ -390,8 +394,7 @@ fn only_empty_entries() {
         SevenZItem { name: "d/e", data: b"", is_dir: false, attributes: None, mtime: Some(5), ctime: None, atime: None },
     ];
     for hc in [false, true] {
-        let mut o = SevenZWriteOptions::default();
-        o.compress_header = hc;
+        let o = SevenZWriteOptions { compress_header: hc, ..Default::default() };
         let bytes = write_7z(&items, &o, wl()).unwrap();
         let ar = SevenZArchive::open(&bytes, &Dec, lim()).unwrap();
         let e = ar.entries();

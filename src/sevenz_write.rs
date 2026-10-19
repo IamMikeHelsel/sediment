@@ -288,7 +288,7 @@ fn write_bits(out: &mut Vec<u8>, bits: &[bool]) {
             cur = 0;
         }
     }
-    if bits.len() % 8 != 0 {
+    if !bits.len().is_multiple_of(8) {
         out.push(cur);
     }
 }
@@ -425,7 +425,10 @@ fn block_data<'a>(items: &[SevenZItem<'a>], files: &[usize]) -> Result<std::borr
     if let [one] = files {
         return Ok(std::borrow::Cow::Borrowed(items[*one].data));
     }
-    let total: usize = files.iter().map(|&i| items[i].data.len()).sum();
+    let total = files
+        .iter()
+        .try_fold(0usize, |acc, &i| acc.checked_add(items[i].data.len()))
+        .ok_or(SevenZWriteError::LimitExceeded)?;
     let mut v = Vec::new();
     reserve(&mut v, total)?;
     for &i in files {
@@ -531,6 +534,8 @@ fn plan_blocks(items: &[SevenZItem<'_>], opts: &SevenZWriteOptions) -> Vec<Vec<u
 // Header records
 // ---------------------------------------------------------------------------
 
+type TimeGetter = fn(&SevenZItem<'_>) -> Option<u64>;
+
 fn write_files_info(out: &mut Vec<u8>, items: &[SevenZItem<'_>]) -> Result<()> {
     out.push(pid::FILES_INFO);
     write_number(out, items.len() as u64);
@@ -569,7 +574,7 @@ fn write_files_info(out: &mut Vec<u8>, items: &[SevenZItem<'_>]) -> Result<()> {
     reserve(out, names.len())?;
     out.extend_from_slice(&names);
 
-    let times: [(u8, fn(&SevenZItem<'_>) -> Option<u64>); 3] =
+    let times: [(u8, TimeGetter); 3] =
         [(pid::CTIME, |i| i.ctime), (pid::ATIME, |i| i.atime), (pid::MTIME, |i| i.mtime)];
     for (id, get) in times {
         let vals: Vec<Option<u64>> = items.iter().map(get).collect();
