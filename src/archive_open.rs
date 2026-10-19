@@ -641,7 +641,17 @@ pub fn open_named<'a>(
 ) -> Result<Box<dyn ArchiveReader + 'a>, ReaderError> {
     let max_stream = to_usize(limits.max_total_size);
     match detect_format(bytes) {
-        Detected::Zip => Ok(Box::new(ZipReader::new(bytes, limits)?)),
+        Detected::Zip => match ZipReader::new(bytes, limits) {
+            // Shrink/Reduce/Implode entries: the legacy reader decodes them.
+            Ok(r) if r.has_legacy_method() => match crate::legacy_open::open_zip_fallback(bytes, limits) {
+                Ok(l) => Ok(l),
+                Err(_) => Ok(Box::new(r)),
+            },
+            Ok(r) => Ok(Box::new(r)),
+            // Legacy methods (Shrink/Implode), ZIP64, descriptors: wider reader.
+            Err(ReaderError::Unsupported) => crate::legacy_open::open_zip_fallback(bytes, limits),
+            Err(e) => Err(e),
+        },
         Detected::Tar | Detected::TarHeuristic => Ok(Box::new(TarReader::new(Cow::Borrowed(bytes), limits)?)),
         Detected::SevenZip => Ok(Box::new(SevenZReader::new(bytes, limits)?)),
         d @ (Detected::Gzip | Detected::Bzip2 | Detected::Xz) => {
@@ -673,7 +683,7 @@ pub fn open_named<'a>(
         // An empty tar archive is only its end-of-archive marker: two or
         // more zero blocks (POSIX ustar; `tar cf x.tar -T /dev/null`).
         Detected::Unknown if is_empty_tar(bytes) => Ok(Box::new(TarReader::new(Cow::Borrowed(bytes), limits)?)),
-        Detected::LzmaAlone | Detected::Unknown => Err(ReaderError::Unsupported),
+        Detected::LzmaAlone | Detected::Unknown => crate::legacy_open::open_legacy(bytes, archive_name, limits),
     }
 }
 

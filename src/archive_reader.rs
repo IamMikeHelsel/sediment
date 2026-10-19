@@ -53,6 +53,12 @@ pub enum ArchiveFormat {
     Xz,
     Bzip2,
     SevenZ,
+    /// LHA/LZH (see `legacy_open`).
+    Lzh,
+    /// ARJ (see `legacy_open`).
+    Arj,
+    /// Unix `compress` single stream (see `legacy_open`).
+    CompressZ,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -281,6 +287,13 @@ impl<'a> ZipReader<'a> {
         }
         reader.entries = entries;
         Ok(reader)
+    }
+
+    /// True when some entry uses a pre-Deflate PKZIP method (Shrink,
+    /// Reduce 1-4, Implode: APPNOTE methods 1-6) that this reader does not
+    /// decode; `archive_open` then routes the archive to `legacy_open`.
+    pub fn has_legacy_method(&self) -> bool {
+        self.zip.entries().iter().any(|z| (1..=6).contains(&z.method))
     }
 
     /// Decode entry `index` (capped at `max_output`) and verify its CRC-32.
