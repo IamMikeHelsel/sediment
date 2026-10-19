@@ -372,11 +372,16 @@ pub fn plan_extraction(entries: &[PlannedEntry], options: &PlanOptions) -> Resul
 
         let is_dir = matches!(e.kind, EntryKind::Dir);
         if !is_dir && (implicit_dirs.contains(&exact) || explicit_dirs.contains(&exact)) {
-            return Err(fail(i, PlanError::PathConflict));
+            let error = if matches!(e.kind, EntryKind::Symlink { .. }) && implicit_dirs.contains(&exact) {
+                PlanError::ThroughSymlink
+            } else {
+                PlanError::PathConflict
+            };
+            return Err(fail(i, error));
         }
-        if !is_dir {
-            if let Some(&first) = nondir.get(&exact) {
-                if first != i {
+        if !is_dir
+            && let Some(&first) = nondir.get(&exact)
+                && first != i {
                     // A symlink duplicated with anything else is ambiguous.
                     if matches!(e.kind, EntryKind::Symlink { .. })
                         || matches!(entries[first].kind, EntryKind::Symlink { .. })
@@ -385,8 +390,6 @@ pub fn plan_extraction(entries: &[PlannedEntry], options: &PlanOptions) -> Resul
                     }
                     warnings.push(PlanWarning::DuplicatePath { index: i, other: first });
                 }
-            }
-        }
 
         // Case collisions between distinct exact paths.
         let folded = fold(comps);

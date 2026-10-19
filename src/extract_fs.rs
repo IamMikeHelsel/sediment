@@ -224,16 +224,14 @@ fn write_atomic(dir: &Path, final_path: &Path, data: &[u8], item: &PlanItem, opt
     let result = (|| -> std::io::Result<()> {
         let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         f.write_all(data)?;
-        if opts.apply_mode {
-            if let Some(mode) = item.mode {
+        if opts.apply_mode
+            && let Some(mode) = item.mode {
                 set_mode(&f, mode)?;
             }
-        }
-        if opts.apply_mtime {
-            if let Some(t) = item.mtime.and_then(to_system_time) {
+        if opts.apply_mtime
+            && let Some(t) = item.mtime.and_then(to_system_time) {
                 f.set_modified(t)?;
             }
-        }
         drop(f);
         fs::rename(&tmp, final_path)
     })();
@@ -269,11 +267,10 @@ pub fn execute_plan(
     opts: &ExtractOptions,
 ) -> Result<ExtractReport, ExtractFailure> {
     let whole = |error| ExtractFailure { index: None, error };
-    if opts.symlinks == SymlinkPolicy::Refuse {
-        if let Some(it) = plan.items.iter().find(|it| matches!(it.kind, PlanKind::Symlink { .. })) {
+    if opts.symlinks == SymlinkPolicy::Refuse
+        && let Some(it) = plan.items.iter().find(|it| matches!(it.kind, PlanKind::Symlink { .. })) {
             return Err(ExtractFailure { index: Some(it.index), error: ExtractError::SymlinksNotAllowed });
         }
-    }
     match fs::metadata(dest) {
         Ok(m) if m.is_dir() => {}
         Ok(_) => return Err(whole(ExtractError::DestinationNotDir)),
@@ -349,7 +346,7 @@ pub fn execute_plan(
 
     // Directory metadata last, deepest first, so writing children does not
     // bump mtimes and read-only modes do not block extraction.
-    dir_meta.sort_by(|a, b| b.1.cmp(&a.1));
+    dir_meta.sort_by_key(|d| std::cmp::Reverse(d.1));
     for (p, _, item) in dir_meta {
         apply_dir_meta(&p, item, opts).map_err(|error| ExtractFailure { index: Some(item.index), error })?;
     }
@@ -364,17 +361,15 @@ fn apply_dir_meta(p: &Path, item: &PlanItem, opts: &ExtractOptions) -> Result<()
         _ => return Err(ExtractError::SymlinkInDestination),
     }
     let f = File::open(p).map_err(|_| ExtractError::Io)?;
-    if opts.apply_mtime {
-        if let Some(t) = item.mtime.and_then(to_system_time) {
+    if opts.apply_mtime
+        && let Some(t) = item.mtime.and_then(to_system_time) {
             f.set_modified(t).map_err(|_| ExtractError::Io)?;
         }
-    }
-    if opts.apply_mode {
-        if let Some(mode) = item.mode {
+    if opts.apply_mode
+        && let Some(mode) = item.mode {
             // Keep the owner able to traverse and modify.
             set_mode(&f, (mode & 0o777) | 0o700).map_err(|_| ExtractError::Io)?;
         }
-    }
     Ok(())
 }
 

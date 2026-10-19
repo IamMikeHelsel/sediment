@@ -295,6 +295,7 @@ mod tests {
     fn civil() {
         assert_eq!(days_from_civil(1970, 1, 1), 0);
         assert_eq!(days_from_civil(2000, 3, 1), 11_017);
-        assert_eq!(dos_to_unix((20 << 9) | (1 << 5) | 1, 0), Some(315_532_800));
+        assert_eq!(dos_to_unix((1 << 5) | 1, 0), Some(315_532_800));
+        assert_eq!(dos_to_unix((20 << 9) | (1 << 5) | 1, 0), Some(946_684_800));
     }
 }
