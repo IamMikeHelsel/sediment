@@ -83,3 +83,5 @@ pub mod wildcard;
 pub mod ar_read;
 pub mod listfile;
 pub mod size_parse;
+pub mod sevenz_write;
+pub mod cli_add_7z;
