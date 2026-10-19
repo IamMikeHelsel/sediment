@@ -46,3 +46,4 @@ pub mod filter_swap;
 pub mod lzma_decode;
 pub mod lzma2_decode;
 pub mod xz_decode;
+pub mod lzma_encode;
