@@ -37,6 +37,7 @@ pub mod zip_dos_time;
 pub mod bit_writer;
 pub mod pax_record_write;
 pub mod archive_detect;
+pub mod deflate64;
 pub mod filter_bcj;
 pub mod filter_delta;
 pub mod filter_swap;
