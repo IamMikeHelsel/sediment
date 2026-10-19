@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Generate hash fixtures for tests/hashes.rs using only the Python stdlib.
+
+Oracle: hashlib (md5, sha1, sha2, sha3, blake2s incl. tree parameters).
+XXH64 has no stdlib oracle; a small reference implementation written from
+the xxHash spec (doc/xxhash_spec.md) is used here, and the Rust tests also
+check the xxHash project's published sanity vectors independently.
+
+BLAKE2sp (unkeyed) is built from hashlib.blake2s leaves/root per the BLAKE2
+paper. The keyed BLAKE2sp KAT file is the published blake2sp-kat.txt from the
+BLAKE2 reference repository (CC0); pass its path with --kat to regenerate
+blake2sp_kat.txt (only the hashes are stored; inputs/key are regenerated).
+
+Usage: python3 tests/gen/hashes.py [--kat path/to/blake2sp-kat.txt]
+"""
+import hashlib
+import os
+import sys
+
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "hashes")
+
+LENGTHS = [0, 1, 2, 3, 4, 7, 8, 31, 32, 33, 55, 56, 57, 63, 64, 65, 71, 72, 73,
+           103, 104, 105, 111, 112, 113, 127, 128, 129, 135, 136, 137, 143, 144,
+           145, 255, 256, 257, 511, 512, 513, 575, 576, 577, 1000, 4095, 4096,
+           4097, 10007, 65536, 300001]
+
+
+def gen_bytes(n):
+    """LCG byte generator shared with tests/hashes.rs (`gen_bytes`)."""
+    state = 0x12345678
+    out = bytearray(n)
+    for i in range(n):
+        state = (state * 1103515245 + 12345) & 0xFFFFFFFF
+        out[i] = state >> 24
+    return bytes(out)
+
+
+M64 = (1 << 64) - 1
+P1 = 0x9E3779B185EBCA87
+P2 = 0xC2B2AE3D27D4EB4F
+P3 = 0x165667B19E3779F9
+P4 = 0x85EBCA77C2B2AE63
+P5 = 0x27D4EB2F165667C5
+
+
+def rotl(x, r):
+    return ((x << r) | (x >> (64 - r))) & M64
+
+
+def xround(acc, lane):
+    return (rotl((acc + lane * P2) & M64, 31) * P1) & M64
+
+
+def xmerge(acc, v):
+    return (((acc ^ xround(0, v)) * P1) + P4) & M64
+
+
+def xxh64(data, seed=0):
+    n = len(data)
+    p = 0
+    if n >= 32:
+        v = [(seed + P1 + P2) & M64, (seed + P2) & M64, seed, (seed - P1) & M64]
+        while p + 32 <= n:
+            for i in range(4):
+                v[i] = xround(v[i], int.from_bytes(data[p + 8 * i:p + 8 * i + 8], "little"))
+            p += 32
+        acc = (rotl(v[0], 1) + rotl(v[1], 7) + rotl(v[2], 12) + rotl(v[3], 18)) & M64
+        for x in v:
+            acc = xmerge(acc, x)
+    else:
+        acc = (seed + P5) & M64
+    acc = (acc + n) & M64
+    while p + 8 <= n:
+        acc ^= xround(0, int.from_bytes(data[p:p + 8], "little"))
+        acc = (rotl(acc, 27) * P1 + P4) & M64
+        p += 8
+    if p + 4 <= n:
+        acc ^= (int.from_bytes(data[p:p + 4], "little") * P1) & M64
+        acc = (rotl(acc, 23) * P2 + P3) & M64
+        p += 4
+    while p < n:
+        acc ^= (data[p] * P5) & M64
+        acc = (rotl(acc, 11) * P1) & M64
+        p += 1
+    acc ^= acc >> 33
+    acc = (acc * P2) & M64
+    acc ^= acc >> 29
+    acc = (acc * P3) & M64
+    acc ^= acc >> 32
+    return acc
+
+
+def blake2sp(data):
+    leaves = []
+    for i in range(8):
+        leaf = hashlib.blake2s(digest_size=32, fanout=8, depth=2, leaf_size=0,
+                               node_offset=i, node_depth=0, inner_size=32,
+                               last_node=(i == 7))
+        stripes = [data[k:k + 64] for k in range(64 * i, len(data), 512)]
+        leaf.update(b"".join(stripes))
+        leaves.append(leaf.digest())
+    root = hashlib.blake2s(digest_size=32, fanout=8, depth=2, leaf_size=0,
+                           node_offset=0, node_depth=1, inner_size=32,
+                           last_node=True)
+    root.update(b"".join(leaves))
+    return root.hexdigest()
+
+
+KEY32 = bytes(range(32))
+
+
+def vectors(data):
+    yield "md5", hashlib.md5(data).hexdigest()
+    yield "sha1", hashlib.sha1(data).hexdigest()
+    yield "sha224", hashlib.sha224(data).hexdigest()
+    yield "sha256", hashlib.sha256(data).hexdigest()
+    yield "sha384", hashlib.sha384(data).hexdigest()
+    yield "sha512", hashlib.sha512(data).hexdigest()
+    yield "sha3_224", hashlib.sha3_224(data).hexdigest()
+    yield "sha3_256", hashlib.sha3_256(data).hexdigest()
+    yield "sha3_384", hashlib.sha3_384(data).hexdigest()
+    yield "sha3_512", hashlib.sha3_512(data).hexdigest()
+    yield "blake2s", hashlib.blake2s(data).hexdigest()
+    # Keyed, truncated output.
+    yield "blake2s_k32_o16", hashlib.blake2s(data, key=KEY32, digest_size=16).hexdigest()
+    # Tree-node parameters, salt, personalization (exercise the parameter block).
+    yield "blake2s_node", hashlib.blake2s(
+        data, digest_size=20, key=b"sediment", salt=b"saltsalt", person=b"personal",
+        fanout=3, depth=4, leaf_size=0x01020304, node_offset=0x0000A0B0C0D0E0F,
+        node_depth=5, inner_size=24, last_node=True).hexdigest()
+    yield "blake2sp", blake2sp(data)
+    yield "xxh64_0", "%016x" % xxh64(data, 0)
+    yield "xxh64_s", "%016x" % xxh64(data, 0x0123456789ABCDEF)
+
+
+def main():
+    os.makedirs(OUT, exist_ok=True)
+    lines = ["# alg length hex-digest; input = gen_bytes(length). Generated by tests/gen/hashes.py"]
+    for n in LENGTHS:
+        data = gen_bytes(n)
+        for alg, hexd in vectors(data):
+            lines.append("%s %d %s" % (alg, n, hexd))
+    with open(os.path.join(OUT, "vectors.txt"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+    if "--kat" in sys.argv:
+        path = sys.argv[sys.argv.index("--kat") + 1]
+        hashes = []
+        expect_in = None
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("in:"):
+                    expect_in = bytes.fromhex(line[3:].strip())
+                elif line.startswith("key:"):
+                    assert bytes.fromhex(line[4:].strip()) == KEY32
+                elif line.startswith("hash:"):
+                    assert expect_in == bytes(range(len(expect_in)))
+                    assert len(expect_in) == len(hashes)
+                    hashes.append(line[5:].strip())
+        assert len(hashes) == 256
+        with open(os.path.join(OUT, "blake2sp_kat.txt"), "w") as f:
+            f.write("# Published BLAKE2sp keyed KAT (BLAKE2 reference repo testvectors/blake2sp-kat.txt, CC0).\n")
+            f.write("# Line i: hash of input bytes 0..i with key 00..1f.\n")
+            f.write("\n".join(hashes) + "\n")
+
+
+if __name__ == "__main__":
+    main()
