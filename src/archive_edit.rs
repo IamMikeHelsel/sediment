@@ -6,7 +6,8 @@
 //!
 //! Detection is by magic bytes ([`crate::archive_detect`]); a gzip, bzip2 or
 //! xz stream is accepted only when its decompressed content is a tar archive
-//! (single compressed files have no members to update).
+//! (single compressed files have no members to update). A ZIP archive behind
+//! a prefix (self-extractor stub) is recognised by its end record.
 
 use std::borrow::Cow;
 use std::path::Path;
@@ -20,6 +21,7 @@ use crate::compress_wrap::{Compression, WrapError, compress, compress_bound_for}
 use crate::sevenz_update::{apply_7z, sevenz_entries};
 use crate::sevenz_write::SevenZWriteOptions;
 use crate::tar_update::{apply_tar, tar_entries};
+use crate::zip64::locate_central_directory;
 use crate::zip_update::{ZipUpdateOptions, apply_zip, zip_entries};
 
 /// Container formats that can be updated.
@@ -65,6 +67,11 @@ pub fn open_source(bytes: &[u8], max_tar: usize) -> Result<EditSource<'_>, Updat
         Detected::Bzip2 => (ReaderFormat::Bzip2, Compression::Bzip2),
         Detected::Xz => (ReaderFormat::Xz, Compression::Xz),
         Detected::LzmaAlone | Detected::Unknown => {
+            // A ZIP behind a prefix (self-extractor stub) is found by its
+            // end of central directory record.
+            if locate_central_directory(bytes).is_ok() {
+                return Ok(EditSource { format: EditFormat::Zip, data: Cow::Borrowed(bytes) });
+            }
             // An empty tar archive is all zero blocks.
             if !bytes.is_empty() && bytes.len() % 512 == 0 && bytes.iter().all(|&b| b == 0) {
                 return Ok(EditSource { format: EditFormat::Tar(Compression::None), data: Cow::Borrowed(bytes) });
