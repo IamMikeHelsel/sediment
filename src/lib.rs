@@ -107,3 +107,7 @@ pub mod zip_write;
 pub mod zipcrypto;
 pub mod zlib_encode;
 pub mod zlib_wrapper;
+pub mod hash_multi;
+pub mod cli_hash;
+pub mod bench;
+pub mod cli_bench;
