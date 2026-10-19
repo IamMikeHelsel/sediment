@@ -85,3 +85,7 @@ pub mod listfile;
 pub mod size_parse;
 pub mod sevenz_write;
 pub mod cli_add_7z;
+pub mod crypto_random;
+pub mod sevenz_aes_coder;
+pub mod zip_crypt;
+pub mod archive_open_crypt;

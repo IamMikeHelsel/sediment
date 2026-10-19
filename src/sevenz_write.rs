@@ -172,6 +172,19 @@ impl Default for SevenZWriteLimits {
     }
 }
 
+/// An extra coder applied to every packed stream after compression (the
+/// innermost coder of each folder), e.g. 7zAES encryption
+/// ([`crate::sevenz_aes_coder::SevenZAesEncoder`]). The coder's unpack size
+/// is the length of its input; its output becomes the packed stream.
+pub trait PackCoder: Sync {
+    /// Encode one packed stream: returns (method ID, coder properties, output).
+    fn encode(&self, packed: &[u8]) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>)>;
+    /// Also apply the coder to the archive header. The header is then always
+    /// written LZMA-compressed and encoded (`-mhe=on`), even when
+    /// `compress_header` is off or compression does not shrink it.
+    fn applies_to_header(&self) -> bool;
+}
+
 /// One archive member at the 7z level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SevenZItem<'a> {
@@ -216,6 +229,16 @@ pub fn unix_attributes(kind: EntryKind, mode: u32) -> u32 {
 /// whose data is the link target and whose Unix mode says `S_IFLNK`.
 /// Names must be valid UTF-8.
 pub fn create_7z(entries: &[ArchiveEntry<'_>], opts: &SevenZWriteOptions, limits: SevenZWriteLimits) -> Result<Vec<u8>> {
+    create_7z_with(entries, opts, limits, None)
+}
+
+/// [`create_7z`] with an optional [`PackCoder`] (e.g. encryption).
+pub fn create_7z_with(
+    entries: &[ArchiveEntry<'_>],
+    opts: &SevenZWriteOptions,
+    limits: SevenZWriteLimits,
+    pack: Option<&dyn PackCoder>,
+) -> Result<Vec<u8>> {
     if entries.len() > limits.max_entries {
         return Err(SevenZWriteError::LimitExceeded);
     }
@@ -248,7 +271,7 @@ pub fn create_7z(entries: &[ArchiveEntry<'_>], opts: &SevenZWriteOptions, limits
             atime: None,
         });
     }
-    write_7z(&items, opts, limits)
+    write_7z_with(&items, opts, limits, pack)
 }
 
 // ---------------------------------------------------------------------------
@@ -437,7 +460,23 @@ fn block_data<'a>(items: &[SevenZItem<'a>], files: &[usize]) -> Result<std::borr
     Ok(std::borrow::Cow::Owned(v))
 }
 
-fn encode_all(items: &[SevenZItem<'_>], blocks: &[Vec<usize>], opts: &SevenZWriteOptions) -> Result<Vec<FolderOut>> {
+/// Append `pack` as the innermost coder of a finished folder.
+fn apply_pack(mut f: FolderOut, pack: Option<&dyn PackCoder>) -> Result<FolderOut> {
+    if let Some(p) = pack {
+        let (id, props, out) = p.encode(&f.packed)?;
+        f.unpack_sizes.push(f.packed.len() as u64);
+        f.coders.push(CoderSpec { id, props });
+        f.packed = out;
+    }
+    Ok(f)
+}
+
+fn encode_all(
+    items: &[SevenZItem<'_>],
+    blocks: &[Vec<usize>],
+    opts: &SevenZWriteOptions,
+    pack: Option<&dyn PackCoder>,
+) -> Result<Vec<FolderOut>> {
     let threads = if opts.threads == 0 {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
     } else {
@@ -448,7 +487,7 @@ fn encode_all(items: &[SevenZItem<'_>], blocks: &[Vec<usize>], opts: &SevenZWrit
 
     let work = |b: &Vec<usize>| -> Result<FolderOut> {
         let data = block_data(items, b)?;
-        encode_folder(&data, opts)
+        apply_pack(encode_folder(&data, opts)?, pack)
     };
     if threads <= 1 {
         return blocks.iter().map(work).collect();
@@ -700,6 +739,17 @@ fn validate_items(items: &[SevenZItem<'_>], limits: &SevenZWriteLimits) -> Resul
 
 /// Build a complete 7z archive in memory.
 pub fn write_7z(items: &[SevenZItem<'_>], opts: &SevenZWriteOptions, limits: SevenZWriteLimits) -> Result<Vec<u8>> {
+    write_7z_with(items, opts, limits, None)
+}
+
+/// [`write_7z`] with an optional [`PackCoder`] applied to every packed
+/// stream (and to the header when [`PackCoder::applies_to_header`]).
+pub fn write_7z_with(
+    items: &[SevenZItem<'_>],
+    opts: &SevenZWriteOptions,
+    limits: SevenZWriteLimits,
+    pack: Option<&dyn PackCoder>,
+) -> Result<Vec<u8>> {
     opts.validate()?;
     validate_items(items, &limits)?;
 
@@ -712,7 +762,7 @@ pub fn write_7z(items: &[SevenZItem<'_>], opts: &SevenZWriteOptions, limits: Sev
     }
 
     let blocks = plan_blocks(items, opts);
-    let folders = encode_all(items, &blocks, opts)?;
+    let folders = encode_all(items, &blocks, opts, pack)?;
     for f in &folders {
         let new_len = (out.len() as u64).checked_add(f.packed.len() as u64).ok_or(SevenZWriteError::LimitExceeded)?;
         if new_len > limits.max_output_bytes {
@@ -724,9 +774,14 @@ pub fn write_7z(items: &[SevenZItem<'_>], opts: &SevenZWriteOptions, limits: Sev
 
     let raw = build_header(items, &blocks, &folders)?;
     drop(folders);
-    let header = if opts.compress_header { encode_header(&raw, (out.len() - 32) as u64)? } else { None };
+    let header_pack = pack.filter(|p| p.applies_to_header());
+    let header = if opts.compress_header || header_pack.is_some() {
+        encode_header(&raw, (out.len() - 32) as u64, header_pack)?
+    } else {
+        None
+    };
     let next: Vec<u8> = match header {
-        Some((packed, enc)) if packed.len() + enc.len() < raw.len() => {
+        Some((packed, enc)) if header_pack.is_some() || packed.len() + enc.len() < raw.len() => {
             reserve(&mut out, packed.len())?;
             out.extend_from_slice(&packed);
             enc
@@ -746,14 +801,15 @@ pub fn write_7z(items: &[SevenZItem<'_>], opts: &SevenZWriteOptions, limits: Sev
 
 /// LZMA-compress `raw` and build the `kEncodedHeader` record pointing at it.
 /// `pack_pos` is where the packed header will start (relative to byte 32).
-fn encode_header(raw: &[u8], pack_pos: u64) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+fn encode_header(raw: &[u8], pack_pos: u64, pack: Option<&dyn PackCoder>) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
     if raw.len() > MAX_INPUT {
-        return Ok(None);
+        // An encrypted header must never fall back to plain text.
+        return if pack.is_some() { Err(SevenZWriteError::LimitExceeded) } else { Ok(None) };
     }
     let mut o = LzmaEncoderOptions::preset(5).map_err(|_| SevenZWriteError::InvalidOptions)?;
     o.dictionary_size = 1 << 20;
     let (coder, packed) = lzma_coder(raw, &o)?;
-    let folder = FolderOut { coders: vec![coder], unpack_sizes: vec![raw.len() as u64], packed };
+    let folder = apply_pack(FolderOut { coders: vec![coder], unpack_sizes: vec![raw.len() as u64], packed }, pack)?;
     let mut enc = vec![pid::ENCODED_HEADER];
     write_pack_and_unpack(&mut enc, pack_pos, &[&folder], Some(&[crc32(raw)]));
     enc.push(pid::END);
