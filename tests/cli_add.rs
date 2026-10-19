@@ -12,7 +12,10 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use common::*;
 use sediment_engine::cli_add::{AddArgs, ArchiveFormat, format_from_name, parse_add_args, run_add};
+use sediment_engine::bzip2_decode::decode_bzip2;
 use sediment_engine::compress_wrap::Compression;
+use sediment_engine::single_compress::*;
+use sediment_engine::xz_decode::decode_xz;
 use sediment_engine::fs_collect::*;
 use sediment_engine::gzip_wrapper::decode_gzip;
 use sediment_engine::zip_decode::entry_data;
@@ -99,6 +102,12 @@ fn end_to_end_from_filesystem_matches_oracle() {
         ("out.tgz", vec!["-mx9"]),
         ("out.tar.gz", vec!["-mx1"]),
         ("out0.tar.gz", vec!["-mx0"]),
+        ("out.tar.xz", vec![]),
+        ("out9.txz", vec!["-mx9"]),
+        ("out0.tar.xz", vec!["-mx0"]),
+        ("out.tar.bz2", vec![]),
+        ("out1.tbz2", vec!["-mx1"]),
+        ("out3.tbz", vec!["-mx=3"]),
     ] {
         let mut args: Vec<OsString> = switches.iter().map(OsString::from).collect();
         args.push(out.join(name).into_os_string());
@@ -125,6 +134,15 @@ fn end_to_end_from_filesystem_matches_oracle() {
     for n in ["out.tgz", "out.tar.gz", "out0.tar.gz"] {
         let gz = std::fs::read(out.join(n)).unwrap();
         assert_eq!(decode_gzip(&gz, 1 << 24, 100_000).unwrap(), tar, "{n}");
+    }
+    for n in ["out.tar.xz", "out9.txz", "out0.tar.xz"] {
+        let xz = std::fs::read(out.join(n)).unwrap();
+        assert_eq!(decode_xz(&xz, 1 << 27, 1 << 24).unwrap(), tar, "{n}");
+    }
+    for (n, digit) in [("out.tar.bz2", b'9'), ("out1.tbz2", b'1'), ("out3.tbz", b'5')] {
+        let bz = std::fs::read(out.join(n)).unwrap();
+        assert_eq!(bz[3], digit, "{n}: -mx level selects the block size");
+        assert_eq!(decode_bzip2(&bz, 1 << 24).unwrap(), tar, "{n}");
     }
     let items = read_tar(&tar);
     assert_eq!(items.len(), actual_spec.len());
@@ -153,8 +171,8 @@ fn cli_errors_and_overwrite() {
     assert_eq!(add(&[&"-mx10", &z, &f]), 2);
     assert_eq!(add(&[&"-q", &z, &f]), 2);
     assert_eq!(add(&[&tmp.path().join("a.rar"), &f]), 2);
-    assert_eq!(add(&[&tmp.path().join("a.tar.xz"), &f]), 1);
-    assert_eq!(add(&[&tmp.path().join("a.tbz2"), &f]), 1);
+    assert_eq!(add(&[&tmp.path().join("a.tar.xz"), &f]), 0);
+    assert_eq!(add(&[&tmp.path().join("a.tbz2"), &f]), 0);
     assert_eq!(add(&[&tmp.path().join("b.zip"), &tmp.path().join("missing")]), 1);
     assert!(!tmp.path().join("b.zip").exists());
     let dir_zip = tmp.path().join("d.zip");
@@ -301,5 +319,137 @@ fn symlinks_loops_special_and_unreadable() {
         assert_eq!(collect(&[os(&t)], &strict, l).unwrap_err(), CollectError::Unreadable);
         assert_eq!(add(&[&tmp.path().join("w.tar"), &t]), 3);
         assert!(tmp.path().join("w.tar").exists());
+    }
+}
+
+#[test]
+fn single_file_compression_end_to_end() {
+    let spec = load_spec();
+    let tmp = TempDir::new("single");
+    let out = tmp.path().join("out");
+    std::fs::create_dir(&out).unwrap();
+    let src = tmp.path().join("src");
+    std::fs::create_dir(&src).unwrap();
+    let want = |base: &str| spec.iter().find(|e| e.kind == EntryKind::File && e.name.ends_with(base.as_bytes())).unwrap().payload.clone();
+    for base in ["text.txt", "random.bin", "zero.bin"] {
+        std::fs::write(src.join(base), want(base)).unwrap();
+    }
+    let cases: [(&str, &str, &[&str]); 9] = [
+        ("text.txt", "text.txt.gz", &[]),
+        ("text.txt", "text.txt.xz", &["-mx9"]),
+        ("text.txt", "text.txt.bz2", &["-mx1"]),
+        ("random.bin", "random.bin.GZ", &["-mx0"]),
+        ("random.bin", "random.bin.xz", &["-mx0"]),
+        ("random.bin", "random.bin.bz2", &[]),
+        ("zero.bin", "zero.bin.gz", &[]),
+        ("zero.bin", "zero.bin.xz", &[]),
+        ("zero.bin", "zero.bin.bz2", &[]),
+    ];
+    for (base, name, sw) in cases {
+        let mut args: Vec<OsString> = sw.iter().map(OsString::from).collect();
+        args.push(out.join(name).into_os_string());
+        args.push(src.join(base).into_os_string());
+        assert_eq!(run_add(&args), 0, "{name}");
+        let c = std::fs::read(out.join(name)).unwrap();
+        let lower = name.to_ascii_lowercase();
+        let d = if lower.ends_with(".gz") {
+            decode_gzip(&c, 1 << 20, 10_000).unwrap()
+        } else if lower.ends_with(".xz") {
+            decode_xz(&c, 1 << 27, 1 << 20).unwrap()
+        } else {
+            decode_bzip2(&c, 1 << 20).unwrap()
+        };
+        assert_eq!(d, want(base), "{name}");
+        // Same bytes as the library path (deterministic, no name/mtime).
+        let kind = single_format_from_name(Path::new(name)).unwrap();
+        let level = sw.first().map(|s| s[3..].parse().unwrap()).unwrap_or(5);
+        assert_eq!(c, compress_single(kind, &want(base), level).unwrap(), "{name}");
+    }
+    // The oracle checks the lower-case names.
+    std::fs::rename(out.join("random.bin.GZ"), out.join("random.bin.gz")).unwrap();
+    write_spec(&out.join("spec.tsv"), &spec);
+    oracle_check(&out);
+    // A symlink to a regular file compresses the target.
+    symlink(src.join("text.txt"), src.join("ln")).unwrap();
+    let ln = tmp.path().join("ln.xz");
+    assert_eq!(add(&[&ln, &src.join("ln")]), 0);
+    assert_eq!(decode_xz(&std::fs::read(&ln).unwrap(), 1 << 27, 1 << 20).unwrap(), want("text.txt"));
+}
+
+#[test]
+fn single_file_errors() {
+    let tmp = TempDir::new("single-err");
+    let t = tmp.path();
+    let f = t.join("f.txt");
+    let g = t.join("g.txt");
+    std::fs::write(&f, b"data").unwrap();
+    std::fs::write(&g, b"more").unwrap();
+    let gz = t.join("f.txt.gz");
+    assert_eq!(add(&[&gz, &f, &g]), 1, "two inputs");
+    assert!(!gz.exists());
+    assert_eq!(add(&[&gz, &t.join("sub")]), 1, "missing input");
+    std::fs::create_dir(t.join("dir")).unwrap();
+    assert_eq!(add(&[&t.join("d.xz"), &t.join("dir")]), 1, "directory input");
+    assert!(!t.join("d.xz").exists());
+    assert_eq!(add(&[&gz, &f]), 0);
+    assert_eq!(add(&[&gz, &f]), 1, "exists without -y");
+    assert_eq!(add(&[&"-y", &"-mx9", &gz, &f]), 0);
+    assert_eq!(add(&[&"-mx10", &t.join("x.bz2"), &f]), 2);
+    // Compressing the output onto itself is refused and leaves it intact.
+    let before = std::fs::read(&gz).unwrap();
+    assert_eq!(add(&[&"-y", &gz, &gz]), 1, "input is the output");
+    assert_eq!(std::fs::read(&gz).unwrap(), before);
+    // Special files are refused.
+    let sock = t.join("s.sock");
+    let _l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    assert_eq!(add(&[&t.join("s.bz2"), &sock]), 1);
+    assert!(!t.join("s.bz2").exists());
+    let leftovers: Vec<_> = std::fs::read_dir(t)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().contains("sediment-tmp"))
+        .collect();
+    assert!(leftovers.is_empty());
+}
+
+#[test]
+fn single_file_library_api() {
+    let tmp = TempDir::new("single-lib");
+    let t = tmp.path();
+    let f = |s: &str| single_format_from_name(Path::new(s));
+    assert_eq!(f("a.gz"), Some(Compression::Gzip));
+    assert_eq!(f("A.XZ"), Some(Compression::Xz));
+    assert_eq!(f("a.txt.bz2"), Some(Compression::Bzip2));
+    assert_eq!(f(".gz"), None);
+    assert_eq!(f("a.bz"), None);
+    assert_eq!(f("a.zip"), None);
+    // Compressed tar names stay tar archives in `sediment a`.
+    assert_eq!(format_from_name(Path::new("a.tar.xz")), Some(ArchiveFormat::Tar(Compression::Xz)));
+    assert_eq!(format_from_name(Path::new("a.xz")), None);
+
+    let p = t.join("data");
+    std::fs::write(&p, vec![9u8; 1000]).unwrap();
+    assert_eq!(read_single_input(&p, 1000).unwrap().len(), 1000);
+    assert_eq!(read_single_input(&p, 999), Err(SingleError::LimitExceeded));
+    assert_eq!(read_single_input(&t.join("none"), 10), Err(SingleError::Unreadable));
+    assert_eq!(read_single_input(t, 10), Err(SingleError::NotRegularFile));
+    assert_eq!(build_single(&t.join("o.gz"), &[], Compression::Gzip, 5), Err(SingleError::InputCount));
+    assert_eq!(build_single(&t.join("o.gz"), &[p.clone(), p.clone()], Compression::Gzip, 5), Err(SingleError::InputCount));
+    assert_eq!(build_single(&p, &[p.clone()], Compression::Gzip, 5), Err(SingleError::SameFile));
+    let (c, n) = build_single(&t.join("o.bz2"), &[p.clone()], Compression::Bzip2, 9).unwrap();
+    assert_eq!(n, 1000);
+    assert_eq!(decode_bzip2(&c, 1000).unwrap(), vec![9u8; 1000]);
+    assert_eq!(compress_single(Compression::Xz, b"x", 10), Err(SingleError::InvalidLevel));
+    for e in [
+        SingleError::InputCount,
+        SingleError::Unreadable,
+        SingleError::NotRegularFile,
+        SingleError::SameFile,
+        SingleError::LimitExceeded,
+        SingleError::Changed,
+        SingleError::Allocation,
+        SingleError::InvalidLevel,
+    ] {
+        assert!(!single_error_message(e).is_empty());
     }
 }
