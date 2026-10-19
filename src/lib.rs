@@ -40,3 +40,6 @@ pub mod tar_read;
 pub mod archive_detect;
 pub mod sevenz_header;
 pub mod sevenz_read;
+pub mod filter_bcj;
+pub mod filter_delta;
+pub mod filter_swap;
