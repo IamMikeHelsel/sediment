@@ -57,3 +57,4 @@ pub mod sevenz_header;
 pub mod sevenz_read;
 pub mod tar_read;
 pub mod xz_decode;
+pub mod wildcard;
