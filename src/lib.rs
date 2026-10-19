@@ -65,3 +65,4 @@ pub mod tar_create;
 pub mod tar_read;
 pub mod xz_decode;
 pub mod zip_create;
+pub mod archive_open;
