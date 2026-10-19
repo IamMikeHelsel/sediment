@@ -670,7 +670,10 @@ fn split_groups(cl: &CommandLine, entries: &[PlannedEntry], chosen: &[usize]) ->
     let mut abs = Group { root: PathBuf::from("/"), planned: Vec::new(), map: Vec::new() };
     for &i in chosen {
         let e = &entries[i];
-        let absolute = cl.full_paths && cfg!(unix) && !flat && e.path.first() == Some(&b'/');
+        // `..` in an absolute name is never honoured: such members stay in
+        // the relative group, where the planner rejects them.
+        let dotdot = e.path.split(|&b| b == b'/' || b == b'\\').any(|c| c == b"..");
+        let absolute = cl.full_paths && cfg!(unix) && !flat && e.path.first() == Some(&b'/') && !dotdot;
         if absolute {
             let mut s = e.clone();
             let start = s.path.iter().position(|&b| b != b'/').unwrap_or(s.path.len());
