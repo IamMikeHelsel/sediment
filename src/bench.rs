@@ -63,10 +63,10 @@ pub const MAX_DICT_BITS: u8 = 26;
 pub const MAX_ITERATIONS: u32 = 1000;
 
 /// Rating cost model (see the module docs).
-pub const COMPRESS_BASE: u64 = 1200;
-pub const COMPRESS_PER_DICT_BIT: u64 = 60;
-pub const DECOMPRESS_PER_BYTE: u64 = 20;
-pub const DECOMPRESS_PER_PACKED_BYTE: u64 = 200;
+pub const COMPRESS_BASE: u64 = 800;
+pub const COMPRESS_PER_DICT_BIT: u64 = 25;
+pub const DECOMPRESS_PER_BYTE: u64 = 12;
+pub const DECOMPRESS_PER_PACKED_BYTE: u64 = 160;
 
 /// xorshift64* pseudo-random generator (deterministic, not cryptographic).
 #[derive(Debug, Clone)]
@@ -243,7 +243,7 @@ pub fn format_lzma_table(dict_bits: u8, passes: &[LzmaPass]) -> String {
     s.push_str(&"-".repeat(46));
     s.push('\n');
     s.push_str(&row("Avr:", &t[0], &t[1], &t[2], &t[3]));
-    s.push_str(&format!("Tot:  {:>10} {:>7}\n", "", (avg[1] + avg[3]) / 2));
+    s.push_str(&format!("Tot: {:>10} {:>7}\n", "", (avg[1] + avg[3]) / 2));
     if let Some(p) = passes.first()
         && p.unpacked > 0
     {

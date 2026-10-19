@@ -123,8 +123,8 @@ pub struct HashReport {
 }
 
 /// Stream `reader` through every method, reading at most `max_bytes` bytes.
-/// Returns the byte count and digests. More than `max_bytes` bytes is
-/// reported as `ErrorKind::FileTooLarge`-style `InvalidData`.
+/// Returns the byte count and digests. A stream longer than `max_bytes` is
+/// reported as an `io::ErrorKind::InvalidData` error.
 pub fn hash_reader<R: Read>(reader: &mut R, methods: &[HashMethod], max_bytes: u64) -> io::Result<(u64, Vec<Digest>)> {
     let mut buf = Vec::new();
     buf.try_reserve_exact(CHUNK).map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
