@@ -21,3 +21,5 @@ pub mod deflate_dynamic;
 pub mod zip_decode;
 pub mod zlib_wrapper;
 pub mod gzip_wrapper;
+pub mod ustar_header;
+pub mod deflate_encode;
