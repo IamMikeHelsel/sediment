@@ -89,7 +89,7 @@ fn check_bytes(check: CheckId, data: &[u8], out: &mut Vec<u8>) {
         CheckId::None => {}
         CheckId::Crc32 => out.extend_from_slice(&crc32(data).to_le_bytes()),
         CheckId::Crc64 => out.extend_from_slice(&crc64_xz(data).to_le_bytes()),
-        CheckId::Sha256 => out.extend_from_slice(&crate::xz_decode::sha256(data)),
+        CheckId::Sha256 => out.extend_from_slice(&crate::hash_sha256::sha256(data)),
     }
 }
 
