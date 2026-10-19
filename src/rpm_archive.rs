@@ -284,20 +284,20 @@ pub fn parse_rpm(data: &[u8], limits: &RpmLimits) -> Result<(RpmInfo, RpmHeader)
     let header_bytes = &data[header_offset..payload_offset];
     let payload = &data[payload_offset..];
 
-    if let Some(h) = sig.get_string(tag::SIG_SHA256)? {
-        if !hex_eq(&h, &sha256(header_bytes)) {
-            return Err(RpmError::DigestMismatch);
-        }
+    if let Some(h) = sig.get_string(tag::SIG_SHA256)?
+        && !hex_eq(&h, &sha256(header_bytes))
+    {
+        return Err(RpmError::DigestMismatch);
     }
-    if let Some(h) = sig.get_string(tag::SIG_SHA1)? {
-        if !hex_eq(&h, &sha1(header_bytes)) {
-            return Err(RpmError::DigestMismatch);
-        }
+    if let Some(h) = sig.get_string(tag::SIG_SHA1)?
+        && !hex_eq(&h, &sha1(header_bytes))
+    {
+        return Err(RpmError::DigestMismatch);
     }
-    if let Some(d) = sig.get_bin(tag::SIG_MD5)? {
-        if d != md5(&data[header_offset..]) {
-            return Err(RpmError::DigestMismatch);
-        }
+    if let Some(d) = sig.get_bin(tag::SIG_MD5)?
+        && d != md5(&data[header_offset..])
+    {
+        return Err(RpmError::DigestMismatch);
     }
     if let Some(list) = header.get_string_array(tag::PAYLOADDIGEST)? {
         let algo = header.get_u32_array(tag::PAYLOADDIGESTALGO)?.and_then(|v| v.first().copied()).unwrap_or(8);
@@ -330,10 +330,8 @@ pub fn parse_rpm(data: &[u8], limits: &RpmLimits) -> Result<(RpmInfo, RpmHeader)
 /// Decompress the payload to the raw cpio stream (output capped at
 /// `max_output`).
 fn unpack_payload<'a>(info: &RpmInfo, payload: &'a [u8], max_output: usize) -> Result<Cow<'a, [u8]>, ReaderError> {
-    if let Some(f) = &info.payload_format {
-        if f != "cpio" {
-            return Err(ReaderError::Unsupported);
-        }
+    if info.payload_format.as_deref().is_some_and(|f| f != "cpio") {
+        return Err(ReaderError::Unsupported);
     }
     if payload.starts_with(b"0707") {
         return Ok(Cow::Borrowed(payload));
