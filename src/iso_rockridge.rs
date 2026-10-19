@@ -234,7 +234,7 @@ pub fn primary_root(image: &[u8]) -> Result<IsoDirRef, RrError> {
 /// byte), minus `skip` bytes announced by the SP entry.
 fn system_use(record: &[u8], skip: usize) -> &[u8] {
     let name_len = record.get(32).copied().unwrap_or(0) as usize;
-    let start = 33 + name_len + usize::from(name_len % 2 == 0) + skip;
+    let start = 33 + name_len + usize::from(name_len.is_multiple_of(2)) + skip;
     record.get(start..).unwrap_or(&[])
 }
 
