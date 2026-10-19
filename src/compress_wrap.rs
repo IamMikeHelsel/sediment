@@ -1,14 +1,29 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Single-stream compression wrappers for tar archives (`.tar.gz` etc.).
+//! Single-stream compression wrappers used for `.tar.gz`/`.tar.xz`/`.tar.bz2`
+//! archives and for single-file `.gz`/`.xz`/`.bz2` output.
 //!
-//! Spec source: RFC 1952 (gzip member format) over RFC 1951 DEFLATE.
-//! Level 0 uses the existing stored-block `gzip_encode::encode_gzip`; levels
-//! 1..=9 frame the compressing `deflate_compress` encoder in the same gzip
-//! header (MTIME 0, OS 255) so output is deterministic. xz and bzip2 return
-//! `Unsupported` until their encoders land.
+//! Spec sources: RFC 1952 (gzip member format) over RFC 1951 DEFLATE; "The
+//! .xz File Format" (Tukaani) via `xz_encode`; the documented bzip2 stream
+//! format via `bzip2_encode`.
+//!
+//! All output is deterministic (no timestamps, no file names).
+//!
+//! `-mx` level mapping (`level` is 0..=9 everywhere):
+//!
+//! | level | gzip                          | xz (LZMA2, CRC64)        | bzip2 block size |
+//! |-------|-------------------------------|--------------------------|------------------|
+//! | 0     | stored DEFLATE blocks         | xz preset 0 (256 KiB)    | 100 000 (`-1`)   |
+//! | 1..=9 | `deflate_compress` level N    | xz preset N              | see [`bzip2_block_level`] |
+//!
+//! The bzip2 mapping follows 7-Zip's documented BZip2 `-mx` table: levels
+//! 0..=2 use 100 kB blocks, 3..=4 use 500 kB, 5..=9 use 900 kB. xz presets
+//! follow the xz tool's dictionary sizes (`LzmaEncoderOptions::preset`).
 
 use crate::crc32::crc32;
+use crate::bzip2_encode::{Bzip2EncodeError, encode_bzip2};
 use crate::deflate_compress::{CompressError, deflate_bound, deflate_compress};
+use crate::lzma_encode::MAX_INPUT;
+use crate::xz_encode::{XzEncodeError, XzOptions, encode_xz};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Compression {
@@ -20,7 +35,7 @@ pub enum Compression {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WrapError {
-    /// Format has no encoder yet (xz, bzip2).
+    /// Format has no encoder. No longer returned (kept for API stability).
     Unsupported,
     InvalidLevel,
     LimitExceeded,
@@ -49,8 +64,34 @@ pub fn compress(kind: Compression, input: &[u8], level: u8, max_output: usize) -
 }
 
 /// Upper bound on `compress` output for `n` input bytes (gzip and none).
+/// For xz and bzip2 use [`compress_bound_for`].
 pub fn compress_bound(n: usize) -> Option<usize> {
     deflate_bound(n)?.checked_add(18)
+}
+
+/// Upper bound on `compress(kind, ..)` output for `n` input bytes at any level.
+pub fn compress_bound_for(kind: Compression, n: usize) -> Option<usize> {
+    match kind {
+        Compression::None => Some(n),
+        Compression::Gzip => compress_bound(n),
+        // LZMA2 falls back to uncompressed chunks (3 header bytes per 64 KiB)
+        // and every block (at most 1 GiB) adds header, padding, check and an
+        // index record; stream header, index and footer are fixed size.
+        Compression::Xz => n.checked_add(3 * (n / 65_536 + 1))?.checked_add(64 * (n / (1 << 30) + 1))?.checked_add(64),
+        // Incompressible data after RLE1/BWT/MTF is Huffman coded at a little
+        // over 8 bits per byte plus per-block tables and selectors.
+        Compression::Bzip2 => n.checked_add(n / 8)?.checked_add(1024),
+    }
+}
+
+/// bzip2 block-size digit (1..=9, block = digit x 100 000 bytes) for `-mx` level 0..=9.
+pub fn bzip2_block_level(level: u8) -> Result<u8, WrapError> {
+    match level {
+        0..=2 => Ok(1),
+        3..=4 => Ok(5),
+        5..=9 => Ok(9),
+        _ => Err(WrapError::InvalidLevel),
+    }
 }
 
 /// gzip member: 10-byte header, DEFLATE data, CRC32 and ISIZE trailer.
@@ -85,12 +126,35 @@ pub fn gzip_compress(input: &[u8], level: u8, max_output: usize) -> Result<Vec<u
     Ok(out)
 }
 
-/// Stub: xz encoding is not implemented yet.
-pub fn xz_compress(_input: &[u8], _level: u8, _max_output: usize) -> Result<Vec<u8>, WrapError> {
-    Err(WrapError::Unsupported)
+/// Single-stream `.xz` (one LZMA2 filter, CRC64 check) at xz preset `level`.
+///
+/// The encoder works on the whole input; `max_output` is checked on the
+/// result (inputs larger than [`MAX_INPUT`] are rejected up front).
+pub fn xz_compress(input: &[u8], level: u8, max_output: usize) -> Result<Vec<u8>, WrapError> {
+    if level > 9 {
+        return Err(WrapError::InvalidLevel);
+    }
+    if input.len() > MAX_INPUT {
+        return Err(WrapError::LimitExceeded);
+    }
+    let opts = XzOptions::preset(level as u32).map_err(|_| WrapError::InvalidLevel)?;
+    let out = encode_xz(input, &opts).map_err(|e| match e {
+        XzEncodeError::InvalidOptions => WrapError::InvalidLevel,
+        XzEncodeError::InputTooLarge => WrapError::LimitExceeded,
+        XzEncodeError::Allocation => WrapError::Allocation,
+    })?;
+    if out.len() > max_output {
+        return Err(WrapError::LimitExceeded);
+    }
+    Ok(out)
 }
 
-/// Stub: bzip2 encoding is not implemented yet.
-pub fn bzip2_compress(_input: &[u8], _level: u8, _max_output: usize) -> Result<Vec<u8>, WrapError> {
-    Err(WrapError::Unsupported)
+/// Single-stream `.bz2` with the block size chosen by [`bzip2_block_level`].
+pub fn bzip2_compress(input: &[u8], level: u8, max_output: usize) -> Result<Vec<u8>, WrapError> {
+    let digit = bzip2_block_level(level)?;
+    encode_bzip2(input, digit, max_output).map_err(|e| match e {
+        Bzip2EncodeError::InvalidLevel => WrapError::InvalidLevel,
+        Bzip2EncodeError::LimitExceeded => WrapError::LimitExceeded,
+        Bzip2EncodeError::Allocation => WrapError::Allocation,
+    })
 }

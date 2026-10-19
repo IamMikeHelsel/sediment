@@ -2,11 +2,14 @@
 //! `sediment a <archive> <paths...>`: create an archive from files.
 //!
 //! The archive format follows the output extension (case-insensitive):
-//! `.zip`, `.tar`, `.tar.gz`/`.tgz` (`.tar.xz`/`.txz`, `.tar.bz2`/`.tbz2`/`.tbz`
-//! are recognised but not yet supported). Switches (anywhere before `--`):
+//! `.zip`, `.tar`, `.tar.gz`/`.tgz`, `.tar.xz`/`.txz`, `.tar.bz2`/`.tbz2`/`.tbz`.
+//! A plain `.gz`, `.xz` or `.bz2` name compresses exactly one regular file
+//! into a single stream (see `single_compress`). Switches (anywhere before `--`):
 //!
-//! * `-mx0` .. `-mx9` (also `-mx=N`): 0 stores, 1..=9 select the DEFLATE
-//!   level (default 5). For `.tar` the level is ignored.
+//! * `-mx0` .. `-mx9` (also `-mx=N`): compression level (default 5). For zip
+//!   and gzip 0 stores and 1..=9 select the DEFLATE level; for xz it is the
+//!   xz preset; for bzip2 it selects the block size (see `compress_wrap`).
+//!   For `.tar` the level is ignored.
 //! * `-y`: overwrite an existing archive (otherwise it is an error; in-place
 //!   update is not supported).
 //! * `-l`: follow symlinks instead of storing them as links.
@@ -19,7 +22,8 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::compress_wrap::{Compression, WrapError, compress, compress_bound};
+use crate::compress_wrap::{Compression, WrapError, compress, compress_bound_for};
+use crate::single_compress::{build_single, report_single, single_error_message, single_format_from_name};
 use crate::fs_collect::{CollectError, CollectLimits, CollectOptions, EntryKind, WarningKind, collect, read_entry_data};
 use crate::tar_create::{TarCreateLimits, create_tar};
 use crate::zip_create::{ZipCreateLimits, ZipCreateOptions, create_zip};
@@ -137,17 +141,14 @@ pub fn run_add(args: &[OsString]) -> i32 {
             return 2;
         }
     };
-    let format = match format_from_name(&a.archive) {
-        Some(f) => f,
-        None => {
-            let _ = writeln!(err, "sediment: cannot infer archive format from name (use .zip, .tar, .tar.gz or .tgz)");
-            return 2;
-        }
-    };
-    if let ArchiveFormat::Tar(c @ (Compression::Xz | Compression::Bzip2)) = format {
-        let n = if c == Compression::Xz { "xz" } else { "bzip2" };
-        let _ = writeln!(err, "sediment: {n} compression is not supported yet");
-        return 1;
+    let format = format_from_name(&a.archive);
+    let single = if format.is_none() { single_format_from_name(&a.archive) } else { None };
+    if format.is_none() && single.is_none() {
+        let _ = writeln!(
+            err,
+            "sediment: cannot infer archive format from name (use .zip, .tar, .tar.gz/.tgz, .tar.xz/.txz, .tar.bz2/.tbz2, or .gz/.xz/.bz2 for one file)"
+        );
+        return 2;
     }
     let exists = std::fs::symlink_metadata(&a.archive).is_ok();
     if exists {
@@ -160,6 +161,29 @@ pub fn run_add(args: &[OsString]) -> i32 {
             return 1;
         }
     }
+
+    let format = match (format, single) {
+        (Some(f), _) => f,
+        (None, Some(kind)) => {
+            return match build_single(&a.archive, &a.inputs, kind, a.level) {
+                Ok((bytes, n_in)) => match write_atomically(&a.archive, &bytes) {
+                    Ok(()) => {
+                        report_single(&a.archive, n_in, bytes.len());
+                        0
+                    }
+                    Err(m) => {
+                        let _ = writeln!(err, "sediment: {m}");
+                        1
+                    }
+                },
+                Err(e) => {
+                    let _ = writeln!(err, "sediment: {}", single_error_message(e));
+                    1
+                }
+            };
+        }
+        (None, None) => return 2,
+    };
 
     let options = CollectOptions {
         follow_symlinks: a.follow_symlinks,
@@ -227,7 +251,7 @@ pub fn run_add(args: &[OsString]) -> i32 {
             if c == Compression::None {
                 tar
             } else {
-                let bound = compress_bound(tar.len()).unwrap_or(usize::MAX);
+                let bound = compress_bound_for(c, tar.len()).unwrap_or(usize::MAX);
                 match compress(c, &tar, a.level, bound) {
                     Ok(v) => v,
                     Err(WrapError::Unsupported) => {

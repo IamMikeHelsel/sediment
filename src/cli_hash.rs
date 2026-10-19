@@ -335,8 +335,11 @@ pub fn parse_hash_args(args: &[OsString]) -> Result<HashArgs, HashCliError> {
         }
         if switches && bytes.len() > 1 && bytes[0] == b'-' {
             let s = a.to_str().ok_or(HashCliError::Usage)?;
-            if s.len() > 5 && s[..5].eq_ignore_ascii_case("-scrc") {
-                specs.push(s[5..].to_string());
+            // Compare on bytes: a multi-byte character may straddle byte 5,
+            // so slicing the str there could panic.
+            if bytes.len() > 5 && bytes[..5].eq_ignore_ascii_case(b"-scrc") {
+                let spec = s.get(5..).ok_or(HashCliError::Usage)?;
+                specs.push(spec.to_string());
                 continue;
             }
             return Err(HashCliError::Usage);

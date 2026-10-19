@@ -236,3 +236,18 @@ fn hash_inputs_limits() {
     assert!(hash_inputs(&[a.clone(), a.clone()], &m, two).is_ok());
     assert_eq!(hash_inputs(&[a.clone(), a.clone(), a], &m, two), Err(HashCliError::LimitExceeded));
 }
+
+#[test]
+fn non_ascii_switch_is_usage_error_not_panic() {
+    // Multi-byte characters straddling (or following) byte 5 must not panic.
+    for sw in ["-scré", "-scrcé", "-sé", "-ééé", "-scr\u{1F600}", "-SCRC\u{1F600}", "-\u{1F600}scrc"] {
+        assert_eq!(parse_hash_args(&os(&[sw, "x"])), Err(HashCliError::Usage), "{sw:?}");
+    }
+    // ASCII prefix is still case-insensitive.
+    assert_eq!(parse_hash_args(&os(&["-SCRCsha1", "x"])).unwrap().methods, vec![HashMethod::Sha1]);
+    let t = TempDir::new("nonascii");
+    let out = run_in(&t.0, &["-scré", "x"]);
+    assert_eq!(out.status.code(), Some(2), "stderr: {}", text(&out.stderr));
+    assert!(text(&out.stderr).contains("usage"));
+    assert!(out.stdout.is_empty());
+}
