@@ -304,10 +304,21 @@ fn recurse_modes() {
 
 #[test]
 fn archive_type_names() {
-    for t in [ArchiveType::Zip, ArchiveType::SevenZ, ArchiveType::Tar, ArchiveType::Gzip, ArchiveType::Bzip2, ArchiveType::Xz] {
+    for t in [
+        ArchiveType::Zip,
+        ArchiveType::SevenZ,
+        ArchiveType::Tar,
+        ArchiveType::Gzip,
+        ArchiveType::Bzip2,
+        ArchiveType::Xz,
+        ArchiveType::Lzh,
+        ArchiveType::Arj,
+        ArchiveType::CompressZ,
+    ] {
         assert_eq!(ArchiveType::from_name(t.name()), Some(t));
         assert_eq!(ArchiveType::from_name(&t.name().to_uppercase()), Some(t));
     }
+    assert_eq!(ArchiveType::from_name("lha"), Some(ArchiveType::Lzh));
     assert_eq!(ArchiveType::from_name("rar"), None);
     assert_eq!(ArchiveType::from_name(""), None);
 }
@@ -383,6 +394,9 @@ fn add_targets() {
         ("x", Some(ArchiveType::Bzip2), Ok(AddTarget::Stream(Compression::Bzip2))),
         ("x", Some(ArchiveType::Xz), Ok(AddTarget::Stream(Compression::Xz))),
         ("x.zip", Some(ArchiveType::SevenZ), Ok(AddTarget::SevenZ)),
+        ("x.lzh", Some(ArchiveType::Lzh), Err(AddTargetError::ReadOnlyType)),
+        ("x.arj", Some(ArchiveType::Arj), Err(AddTargetError::ReadOnlyType)),
+        ("x.Z", Some(ArchiveType::CompressZ), Err(AddTargetError::ReadOnlyType)),
     ];
     for (name, t, want) in table {
         assert_eq!(add_target(name.as_ref(), *t), *want, "{name} {t:?}");

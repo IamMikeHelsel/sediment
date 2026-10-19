@@ -451,6 +451,10 @@ fn reader_error(ui: &mut Ui<'_, '_>, e: ReaderError) -> i32 {
 }
 
 fn type_matches(t: ArchiveType, d: Detected) -> bool {
+    // Formats without a magic in `archive_detect` are checked after opening.
+    if matches!(t, ArchiveType::Lzh | ArchiveType::Arj | ArchiveType::CompressZ) {
+        return true;
+    }
     matches!(
         (t, d),
         (ArchiveType::Zip, Detected::Zip)
@@ -508,7 +512,20 @@ fn open_reader<'b>(input: &'b Input, cl: &CommandLine, ui: &mut Ui<'_, '_>) -> R
         }
     }
     let opened = if input.from_stdin { open_stdin_bytes(buf, limits) } else { open_named(buf, &input.name, limits) };
-    opened.map_err(|e| reader_error(ui, e))
+    let reader = opened.map_err(|e| reader_error(ui, e))?;
+    let expected = match cl.archive_type {
+        Some(ArchiveType::Lzh) => Some(ArchiveFormat::Lzh),
+        Some(ArchiveType::Arj) => Some(ArchiveFormat::Arj),
+        Some(ArchiveType::CompressZ) => Some(ArchiveFormat::CompressZ),
+        _ => None,
+    };
+    if let (Some(t), Some(f)) = (cl.archive_type, expected)
+        && reader.format() != f
+    {
+        ui.err(&format!("cannot open the file as {} archive", t.name()));
+        return Err(EXIT_FATAL);
+    }
+    Ok(reader)
 }
 
 fn format_name(f: ArchiveFormat) -> &'static str {
@@ -519,6 +536,9 @@ fn format_name(f: ArchiveFormat) -> &'static str {
         ArchiveFormat::Xz => "xz",
         ArchiveFormat::Bzip2 => "bzip2",
         ArchiveFormat::SevenZ => "7z",
+        ArchiveFormat::Lzh => "lzh",
+        ArchiveFormat::Arj => "arj",
+        ArchiveFormat::CompressZ => "Z",
     }
 }
 
@@ -1009,6 +1029,8 @@ pub enum AddTarget {
 pub enum AddTargetError {
     /// No `-t` and the name has no known extension (command line, exit 7).
     UnknownName,
+    /// `-t` names a read-only type (lzh, arj, Z; command line, exit 7).
+    ReadOnlyType,
 }
 
 /// Pick the output layout from `-t` or the archive name.
@@ -1020,6 +1042,7 @@ pub fn add_target(archive: &Path, t: Option<ArchiveType>) -> Result<AddTarget, A
         Some(ArchiveType::Bzip2) => return Ok(AddTarget::Stream(Compression::Bzip2)),
         Some(ArchiveType::Xz) => return Ok(AddTarget::Stream(Compression::Xz)),
         Some(ArchiveType::SevenZ) => return Ok(AddTarget::SevenZ),
+        Some(ArchiveType::Lzh | ArchiveType::Arj | ArchiveType::CompressZ) => return Err(AddTargetError::ReadOnlyType),
         None => {}
     }
     if let Some(f) = format_from_name(archive) {
@@ -1436,6 +1459,10 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         Ok(t) => t,
         Err(AddTargetError::UnknownName) => {
             ui.err("cannot infer archive format from name (use -t or .zip, .7z, .tar, .tar.gz, .tgz, .tar.xz, .tar.bz2, .gz, .bz2, .xz)");
+            return EXIT_CMDLINE;
+        }
+        Err(AddTargetError::ReadOnlyType) => {
+            ui.err("this archive type can be read but not created");
             return EXIT_CMDLINE;
         }
     };

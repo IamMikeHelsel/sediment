@@ -552,6 +552,17 @@ fn typed_open() {
     assert_eq!(text(&o.stderr), "sediment: cannot open the file as zip archive\n");
     let o = run(&argv!["l", "-txz", wire("tree.tgz")]);
     assert_eq!(code(&o), 2);
+    // Read-only legacy types are checked after opening.
+    let legacy = |n: &str| root().join("tests/fixtures/legacy").join(n);
+    for (ty, f) in [("-tlzh", "lh5_l1.lzh"), ("-tarj", "m1.arj")] {
+        let o = run(&argv!["t", ty, legacy(f)]);
+        assert_eq!(code(&o), 0, "{ty} {f}: {}", text(&o.stderr));
+    }
+    let o = run(&argv!["l", "-tarj", legacy("lh5_l1.lzh")]);
+    assert_eq!(code(&o), 2);
+    assert_eq!(text(&o.stderr), "sediment: cannot open the file as arj archive\n");
+    let o = run(&argv!["a", "-tlzh", wire("x.lzh"), wire("tree/hello.txt")]);
+    assert_eq!(code(&o), 7);
     let t = TempDir::new("txz");
     let o = run(&argv!["x", "-txz", wire("readme.md.xz"), out_arg(&t.0)]);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));

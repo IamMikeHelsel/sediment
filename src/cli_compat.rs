@@ -15,7 +15,7 @@
 //! | `-r`, `-r-`, `-r0` | recurse names: always / never (default) / wildcard names only |
 //! | `-i[r[-\|0]]{!wildcard\|@listfile}` | include names (repeatable) |
 //! | `-x[r[-\|0]]{!wildcard\|@listfile}` | exclude names (repeatable) |
-//! | `-t{zip\|7z\|tar\|gzip\|gz\|bzip2\|bz2\|xz}` | archive type |
+//! | `-t{zip\|7z\|tar\|gzip\|gz\|bzip2\|bz2\|xz\|lzh\|arj\|z}` | archive type (lzh/arj/z: read only) |
 //! | `-o{dir}` | output directory (`x`, `e`) |
 //! | `-y` | assume Yes (overwrite on extract, replace archive on add) |
 //! | `-ao{a\|s\|t\|u}` | overwrite all / skip / rename existing / rename new |
@@ -121,12 +121,18 @@ pub enum ArchiveType {
     Gzip,
     Bzip2,
     Xz,
+    /// LHA / LZH (read only).
+    Lzh,
+    /// ARJ (read only).
+    Arj,
+    /// Unix `compress` `.Z` (read only).
+    CompressZ,
 }
 
 impl ArchiveType {
     /// `-t` value (case-insensitive) to type.
     pub fn from_name(name: &str) -> Option<ArchiveType> {
-        let table: [(&str, ArchiveType); 8] = [
+        let table: [(&str, ArchiveType); 12] = [
             ("zip", ArchiveType::Zip),
             ("7z", ArchiveType::SevenZ),
             ("tar", ArchiveType::Tar),
@@ -135,6 +141,10 @@ impl ArchiveType {
             ("bzip2", ArchiveType::Bzip2),
             ("bz2", ArchiveType::Bzip2),
             ("xz", ArchiveType::Xz),
+            ("lzh", ArchiveType::Lzh),
+            ("lha", ArchiveType::Lzh),
+            ("arj", ArchiveType::Arj),
+            ("z", ArchiveType::CompressZ),
         ];
         table.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|&(_, t)| t)
     }
@@ -148,6 +158,9 @@ impl ArchiveType {
             ArchiveType::Gzip => "gzip",
             ArchiveType::Bzip2 => "bzip2",
             ArchiveType::Xz => "xz",
+            ArchiveType::Lzh => "lzh",
+            ArchiveType::Arj => "arj",
+            ArchiveType::CompressZ => "Z",
         }
     }
 }
