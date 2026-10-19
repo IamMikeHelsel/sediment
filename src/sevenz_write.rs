@@ -4,7 +4,9 @@
 //! stream / empty file vectors, Windows attributes with the Unix extension,
 //! FILETIME timestamps), Copy / LZMA / LZMA2 coders with an optional BCJ
 //! branch-converter filter in front, solid blocks with a configurable size,
-//! CRC-32 for every file, and an LZMA-compressed ("encoded") header.
+//! CRC-32 for every file, an LZMA-compressed ("encoded") header, and an
+//! optional extra innermost coder per folder ([`PackCoder`], used for 7zAES
+//! encryption including the header).
 //!
 //! Spec sources: the public "7z Format" description (`7zFormat.txt` from the
 //! LZMA SDK `DOC/` directory): signature header layout, the `NUMBER`

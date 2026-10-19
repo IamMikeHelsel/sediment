@@ -42,8 +42,7 @@ fn os_random(_buf: &mut [u8]) -> bool {
 }
 
 fn fallback_random(buf: &mut [u8]) {
-    let mut block = 0u64;
-    for chunk in buf.chunks_mut(32) {
+    for (block, chunk) in (0u64..).zip(buf.chunks_mut(32)) {
         let mut sha = Sha256::new();
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         sha.update(&n.to_le_bytes());
@@ -61,7 +60,6 @@ fn fallback_random(buf: &mut [u8]) {
         }
         let d = sha.finalize();
         chunk.copy_from_slice(&d[..chunk.len()]);
-        block += 1;
     }
 }
 
