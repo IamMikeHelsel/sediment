@@ -8,6 +8,7 @@
 //! listings of tests/fixtures/sevenz (tests/gen/sevenz_oracle.sh,
 //! tests/gen/sevenz.py), and the list files of tests/fixtures/cli_compat
 //! (tests/gen/cli_compat.py).
+#![allow(clippy::useless_vec, clippy::type_complexity)]
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;

@@ -254,7 +254,7 @@ pub fn decode_listfile(data: &[u8], charset: Charset) -> Result<Vec<String>, Lis
                 return parse_listfile(data, max);
             }
             let body = data.strip_prefix(b"\xfe\xff").unwrap_or(data);
-            if body.len() % 2 != 0 {
+            if !body.len().is_multiple_of(2) {
                 return Err(ListFileError::InvalidUtf16);
             }
             let mut swapped = body.chunks_exact(2).flat_map(|c| [c[1], c[0]]);
@@ -552,13 +552,12 @@ fn list(cl: &CommandLine, ui: &mut Ui<'_, '_>, reader: &dyn ArchiveReader, chose
     if cl.technical {
         let mut extra = Vec::new();
         let mut detailed: Option<Vec<SltEntry>> = None;
-        if reader.format() == ArchiveFormat::SevenZ {
-            if let Ok((h, e)) = sevenz_details(buf, ReaderLimits::default()) {
-                if e.len() == reader.entries().len() {
-                    extra = h;
-                    detailed = Some(e);
-                }
-            }
+        if reader.format() == ArchiveFormat::SevenZ
+            && let Ok((h, e)) = sevenz_details(buf, ReaderLimits::default())
+            && e.len() == reader.entries().len()
+        {
+            extra = h;
+            detailed = Some(e);
         }
         if !cl.no_headers {
             let name = cl.archive.as_deref().map_or_else(|| String::from("stdin"), os_display);
@@ -1278,14 +1277,14 @@ fn gather(cl: &CommandLine, ui: &mut Ui<'_, '_>, inputs: &[AddInput], sel: &Sele
     out.entries.sort_by(|a, b| name_key(&a.name).cmp(&name_key(&b.name)));
     let mut deduped: Vec<CollectedEntry> = Vec::with_capacity(out.entries.len());
     for e in out.entries.drain(..) {
-        if let Some(prev) = deduped.last() {
-            if prev.name == e.name {
-                if prev.source == e.source || prev.kind == FsKind::Directory && e.kind == FsKind::Directory {
-                    continue;
-                }
-                ui.err_entry("duplicate entry name", &e.name);
-                return Err(EXIT_FATAL);
+        if let Some(prev) = deduped.last()
+            && prev.name == e.name
+        {
+            if prev.source == e.source || prev.kind == FsKind::Directory && e.kind == FsKind::Directory {
+                continue;
             }
+            ui.err_entry("duplicate entry name", &e.name);
+            return Err(EXIT_FATAL);
         }
         deduped.push(e);
     }

@@ -412,10 +412,11 @@ fn name_rule(arg: &OsStr, start: usize, shown: &str) -> Result<NameRule, CmdLine
 
 fn positional_name(arg: OsString) -> NameItem {
     let bytes = arg.as_encoded_bytes();
-    if bytes.len() > 1 && bytes[0] == b'@' {
-        if let Some(rest) = os_tail(&arg, 1) {
-            return NameItem::ListFile(PathBuf::from(rest));
-        }
+    if bytes.len() > 1
+        && bytes[0] == b'@'
+        && let Some(rest) = os_tail(&arg, 1)
+    {
+        return NameItem::ListFile(PathBuf::from(rest));
     }
     NameItem::Wildcard(arg)
 }

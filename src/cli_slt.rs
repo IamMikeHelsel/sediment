@@ -96,9 +96,9 @@ pub fn generic_entry(reader: &dyn ArchiveReader, i: usize) -> SltEntry {
 pub fn dictionary_name(d: u64) -> String {
     if d.is_power_of_two() {
         d.trailing_zeros().to_string()
-    } else if d % (1 << 20) == 0 {
+    } else if d.is_multiple_of(1 << 20) {
         format!("{}m", d >> 20)
-    } else if d % (1 << 10) == 0 {
+    } else if d.is_multiple_of(1 << 10) {
         format!("{}k", d >> 10)
     } else {
         d.to_string()
@@ -154,9 +154,12 @@ fn is_aes(c: &Coder) -> bool {
     c.method_id == [0x06, 0xf1, 0x07, 0x01]
 }
 
+/// Archive-level `(key, value)` lines and the per-item blocks of a 7z.
+pub type SevenZDetails = (Vec<(String, String)>, Vec<SltEntry>);
+
 /// 7z listing details: archive-level `(key, value)` lines and one
 /// [`SltEntry`] per non-anti item, in the order `SevenZReader` lists them.
-pub fn sevenz_details(bytes: &[u8], limits: ReaderLimits) -> Result<(Vec<(String, String)>, Vec<SltEntry>), ReaderError> {
+pub fn sevenz_details(bytes: &[u8], limits: ReaderLimits) -> Result<SevenZDetails, ReaderError> {
     let codecs = SevenZCodecs { max_output: limits.max_total_size };
     let sl = SevenZLimits { max_files: limits.max_entries, max_unpack_bytes: limits.max_total_size, ..SevenZLimits::default() };
     let archive = SevenZArchive::open(bytes, &codecs, sl)?;
