@@ -38,6 +38,8 @@ pub mod bit_writer;
 pub mod pax_record_write;
 pub mod archive_detect;
 pub mod archive_reader;
+pub mod bzip2_decode;
+pub mod bzip2_encode;
 pub mod deflate64;
 pub mod extract_fs;
 pub mod extract_plan;
