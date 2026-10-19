@@ -46,6 +46,7 @@ use crate::cli_compat::{
 };
 use crate::cli_seam::listfile::{ListFileError, parse_listfile};
 use crate::cli_seam::slt_format::{SltEntry, format_entry};
+use crate::cli_slt::{archive_header, generic_entry, listed_size, sevenz_details};
 use crate::cli_seam::wildcard::{match_name, match_path};
 use crate::compress_wrap::{Compression, WrapError, compress, compress_bound};
 use crate::extract_fs::{ExtractError, ExtractOptions, OverwritePolicy, SymlinkPolicy, execute_plan};
@@ -143,14 +144,6 @@ impl Ui<'_, '_> {
 
 fn shown(name: &[u8]) -> String {
     escape_name(name).unwrap_or_else(|_| String::from("?"))
-}
-
-/// Path text for `-slt`: UTF-8 as is, escaped when not printable UTF-8.
-fn slt_path(name: &[u8]) -> String {
-    match std::str::from_utf8(name) {
-        Ok(s) if !s.chars().any(|c| c.is_control()) => s.to_owned(),
-        _ => shown(name),
-    }
 }
 
 fn os_display(p: &Path) -> String {
@@ -424,63 +417,6 @@ fn format_name(f: ArchiveFormat) -> &'static str {
 // l / t
 // ---------------------------------------------------------------------------
 
-/// Seconds since 1970 to FILETIME (100 ns ticks since 1601), if representable.
-pub fn unix_to_filetime(secs: i64) -> Option<u64> {
-    let since_1601 = secs.checked_add(11_644_473_600)?;
-    u64::try_from(since_1601).ok()?.checked_mul(10_000_000)
-}
-
-/// Windows attributes (+ Unix extension when the mode is known) for `-slt`.
-pub fn entry_attributes(e: &PlannedEntry, format: ArchiveFormat) -> Option<u32> {
-    let (dos, type_bits) = match e.kind {
-        EntryKind::Dir => (0x10u32, 0o040000u32),
-        EntryKind::Symlink { .. } => (0, 0o120000),
-        _ if matches!(format, ArchiveFormat::Zip | ArchiveFormat::SevenZ) => (0x20, 0o100000),
-        _ => (0, 0o100000),
-    };
-    match e.mode {
-        Some(m) => Some(dos | 0x8000 | ((type_bits | (m & 0o7777)) << 16)),
-        None if dos != 0 => Some(dos),
-        None => None,
-    }
-}
-
-fn listed_size(e: &PlannedEntry) -> u64 {
-    match &e.kind {
-        EntryKind::Symlink { target } => target.len() as u64,
-        EntryKind::Dir => 0,
-        _ => e.size,
-    }
-}
-
-/// `-slt` block fields for member `i`.
-pub fn slt_entry(reader: &dyn ArchiveReader, i: usize) -> SltEntry {
-    let format = reader.format();
-    let e = &reader.entries()[i];
-    let is_dir = matches!(e.kind, EntryKind::Dir);
-    SltEntry {
-        path: slt_path(&e.path),
-        folder: match format {
-            ArchiveFormat::Zip | ArchiveFormat::Tar => Some(is_dir),
-            _ => None,
-        },
-        size: listed_size(e),
-        packed_size: None,
-        modified: e.mtime.and_then(unix_to_filetime),
-        created: None,
-        accessed: None,
-        attributes: entry_attributes(e, format),
-        crc: if is_dir { None } else { reader.crc32(i) },
-        encrypted: false,
-        method: match format {
-            ArchiveFormat::Gzip => "Deflate".into(),
-            ArchiveFormat::Bzip2 => "BZip2".into(),
-            _ => String::new(),
-        },
-        block: None,
-    }
-}
-
 fn run_read(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
     let (_, sel) = match build_selector(cl, ui) {
         Ok(s) => s,
@@ -496,24 +432,35 @@ fn run_read(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
     };
     let chosen: Vec<usize> = (0..reader.entries().len()).filter(|&i| sel.selects(&reader.entries()[i].path)).collect();
     if cl.command == Command::List {
-        list(cl, ui, reader.as_ref(), &chosen, buf.len());
+        list(cl, ui, reader.as_ref(), &chosen, &buf);
         EXIT_OK
     } else {
         test(cl, ui, reader.as_ref(), &chosen)
     }
 }
 
-fn list(cl: &CommandLine, ui: &mut Ui<'_, '_>, reader: &dyn ArchiveReader, chosen: &[usize], physical: usize) {
+fn list(cl: &CommandLine, ui: &mut Ui<'_, '_>, reader: &dyn ArchiveReader, chosen: &[usize], buf: &[u8]) {
     if cl.technical {
+        let mut extra = Vec::new();
+        let mut detailed: Option<Vec<SltEntry>> = None;
+        if reader.format() == ArchiveFormat::SevenZ {
+            if let Ok((h, e)) = sevenz_details(buf, ReaderLimits::default()) {
+                if e.len() == reader.entries().len() {
+                    extra = h;
+                    detailed = Some(e);
+                }
+            }
+        }
         if !cl.no_headers {
             let name = os_display(&cl.archive);
-            ui.out(&format!(
-                "Listing archive: {name}\n\n--\nPath = {name}\nType = {}\nPhysical Size = {physical}\n\n----------\n",
-                format_name(reader.format())
-            ));
+            ui.out(&archive_header(&name, format_name(reader.format()), buf.len() as u64, &extra));
         }
         for &i in chosen {
-            ui.out(&format_entry(&slt_entry(reader, i)));
+            let entry = match &detailed {
+                Some(d) => d[i].clone(),
+                None => generic_entry(reader, i),
+            };
+            ui.out(&format_entry(&entry));
         }
         return;
     }
@@ -1383,3 +1330,4 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
     }
     if warned { EXIT_WARNING } else { EXIT_OK }
 }
+

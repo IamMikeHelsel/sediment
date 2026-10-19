@@ -81,3 +81,4 @@ pub mod archive_open;
 pub mod cli_seam;
 pub mod cli_compat;
 pub mod cli_run;
+pub mod cli_slt;
