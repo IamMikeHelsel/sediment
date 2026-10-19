@@ -9,7 +9,8 @@
 //!   a [switches] ARCHIVE PATHS...  create an archive (see `cli_add`)
 //!   list|test ARCHIVE         original ZIP-only commands (frozen output)
 //! Readable formats for l/t/x/e: zip, tar, gzip/bzip2/xz single streams,
-//!   tar.gz/tgz, tar.bz2/tbz2/tbz, tar.xz/txz and 7z (see `archive_open`).
+//!   tar.gz/tgz, tar.bz2/tbz2/tbz, tar.xz/txz, 7z, cpio, ar, deb, rpm and
+//!   xar (see `archive_open`).
 //! Switches for x/e: -o<dir> output directory, -y assume yes (overwrite),
 //!   -aoa overwrite all, -aos skip existing, -aou auto-rename new files,
 //!   -snl create symbolic links (default: skip them with a warning),
