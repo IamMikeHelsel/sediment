@@ -7,3 +7,6 @@ pub mod bit_reader;
 pub mod zip_local;
 pub mod zip_central;
 pub mod zip_ranges;
+pub mod zip_index;
+pub mod archive_name;
+pub mod adler32;
