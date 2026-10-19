@@ -36,3 +36,7 @@ pub mod xz_stream;
 pub mod zip_dos_time;
 pub mod bit_writer;
 pub mod pax_record_write;
+pub mod zip64;
+pub mod zip_descriptor;
+pub mod zip_extra_read;
+pub mod zip_reader2;
