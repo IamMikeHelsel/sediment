@@ -13,7 +13,7 @@ Files:
   payload.bin.gz/.bz2/.xz     single streams of payload.bin (gz has FNAME)
   pair.tar.gz.whole           tar (ustar) of hello.txt then payload.bin
   pair.tar.gz.001..           pair.tar.gz split into 2048-byte volumes
-  pair.zip.001..              zip (deflate) of the same members, 3000-byte volumes
+  pair.zip.001..              zip (deflate) of the same members, 5000-byte volumes
   gap.tar.gz.001, .003        a split set whose second volume is missing
 """
 import bz2
