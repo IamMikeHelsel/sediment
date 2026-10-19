@@ -30,7 +30,8 @@ use crate::extract_plan::{EntryKind, PlannedEntry};
 use crate::filter_bcj::{BcjArch, bcj_decode, parse_bcj_properties};
 use crate::filter_delta::{delta_decode, parse_delta_properties};
 use crate::filter_swap::{SwapWidth, swap_convert};
-use crate::gzip_wrapper::{GzipError, decode_gzip};
+use crate::gzip_members::decode_gzip_members;
+use crate::gzip_wrapper::GzipError;
 use crate::inflate::inflate_raw;
 use crate::lzma_decode::{decode_lzma_raw, decode_props_byte};
 use crate::lzma_properties::LzmaProperties;
@@ -408,7 +409,8 @@ pub fn decompress(format: ArchiveFormat, bytes: &[u8], max_output: usize) -> Res
         ArchiveFormat::Gzip => {
             // Each DEFLATE block costs at least 3 bits of input.
             let max_blocks = bytes.len().saturating_mul(8) / 3 + 16;
-            Ok(decode_gzip(bytes, max_output, max_blocks)?)
+            // RFC 1952 2.2: a gzip file is a series of members.
+            Ok(decode_gzip_members(bytes, max_output, max_blocks)?.0)
         }
         ArchiveFormat::Bzip2 => Ok(decode_bzip2(bytes, max_output)?),
         ArchiveFormat::Xz => Ok(decode_xz(bytes, MAX_DICTIONARY, max_output)?),
@@ -639,7 +641,17 @@ pub fn open_named<'a>(
 ) -> Result<Box<dyn ArchiveReader + 'a>, ReaderError> {
     let max_stream = to_usize(limits.max_total_size);
     match detect_format(bytes) {
-        Detected::Zip => Ok(Box::new(ZipReader::new(bytes, limits)?)),
+        Detected::Zip => match ZipReader::new(bytes, limits) {
+            // Shrink/Reduce/Implode entries: the legacy reader decodes them.
+            Ok(r) if r.has_legacy_method() => match crate::legacy_open::open_zip_fallback(bytes, limits) {
+                Ok(l) => Ok(l),
+                Err(_) => Ok(Box::new(r)),
+            },
+            Ok(r) => Ok(Box::new(r)),
+            // Legacy methods (Shrink/Implode), ZIP64, descriptors: wider reader.
+            Err(ReaderError::Unsupported) => crate::legacy_open::open_zip_fallback(bytes, limits),
+            Err(e) => Err(e),
+        },
         Detected::Tar | Detected::TarHeuristic => Ok(Box::new(TarReader::new(Cow::Borrowed(bytes), limits)?)),
         Detected::SevenZip => Ok(Box::new(SevenZReader::new(bytes, limits)?)),
         d @ (Detected::Gzip | Detected::Bzip2 | Detected::Xz) => {
@@ -663,15 +675,39 @@ pub fn open_named<'a>(
             if data.len() as u64 > limits.max_entry_size {
                 return Err(ReaderError::LimitExceeded);
             }
+            // The last trailer only covers the last member of a multi-member
+            // gzip file; list the CRC-32 of the whole (verified) output.
+            let crc = crc.map(|_| crate::crc32::crc32(&data));
             Ok(Box::new(StreamReader::new(format, member, data, mtime, crc)))
         }
-        Detected::LzmaAlone | Detected::Unknown => Err(ReaderError::Unsupported),
+        // An empty tar archive is only its end-of-archive marker: two or
+        // more zero blocks (POSIX ustar; `tar cf x.tar -T /dev/null`).
+        Detected::Unknown if is_empty_tar(bytes) => Ok(Box::new(TarReader::new(Cow::Borrowed(bytes), limits)?)),
+        Detected::LzmaAlone | Detected::Unknown => crate::legacy_open::open_legacy(bytes, archive_name, limits),
     }
+}
+
+/// True for a non-empty run of at least two all-zero 512-byte blocks.
+fn is_empty_tar(bytes: &[u8]) -> bool {
+    bytes.len() >= 1024 && bytes.len().is_multiple_of(512) && bytes.iter().all(|&b| b == 0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_tar() {
+        assert!(is_empty_tar(&[0; 1024]));
+        assert!(is_empty_tar(&[0; 10240]));
+        assert!(!is_empty_tar(&[0; 512]));
+        assert!(!is_empty_tar(&[0; 1000]));
+        let mut b = vec![0u8; 1024];
+        b[700] = 1;
+        assert!(!is_empty_tar(&b));
+        let r = open_named(&[0; 10240], b"e.tar", ReaderLimits::default()).unwrap();
+        assert!(r.entries().is_empty());
+    }
 
     #[test]
     fn member_names() {
