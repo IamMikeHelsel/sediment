@@ -28,3 +28,8 @@ pub mod ustar_write_header;
 pub mod lzma_properties;
 pub mod sevenz_start;
 pub mod xz_vli;
+pub mod zip_write;
+pub mod crc32_bzip2;
+pub mod gzip_encode;
+pub mod zlib_encode;
+pub mod xz_stream;
