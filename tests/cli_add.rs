@@ -179,7 +179,7 @@ fn arg_parsing_and_format_detection() {
         p(&["-mx7", "x.zip", "a", "-y", "b"]).unwrap(),
         AddArgs { archive: "x.zip".into(), inputs: vec!["a".into(), "b".into()], level: 7, overwrite: true, follow_symlinks: false }
     );
-    assert_eq!(p(&["-l", "x.zip", "a"]).unwrap().follow_symlinks, true);
+    assert!(p(&["-l", "x.zip", "a"]).unwrap().follow_symlinks);
     assert_eq!(p(&["x.zip", "a"]).unwrap().level, 5);
     assert!(p(&["-mx", "x.zip", "a"]).is_err());
     assert!(p(&["-mx=", "x.zip", "a"]).is_err());
@@ -285,11 +285,11 @@ fn symlinks_loops_special_and_unreadable() {
     // Unreadable files/dirs (skipped when running as root, which can read anything).
     let secret = t.join("secret");
     std::fs::write(&secret, b"x").unwrap();
-    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0)).unwrap();
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o000)).unwrap();
     let locked = t.join("locked");
     std::fs::create_dir(&locked).unwrap();
     std::fs::write(locked.join("inner"), b"y").unwrap();
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0)).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
     if std::fs::File::open(&secret).is_err() {
         let c = collect(&[os(&t)], &o, l).unwrap();
         let kinds: Vec<_> = c.warnings.iter().map(|w| w.kind).collect();

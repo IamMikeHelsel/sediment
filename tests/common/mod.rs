@@ -109,13 +109,13 @@ impl Drop for TempDir {
         #[cfg(unix)]
         fn fix(p: &Path) {
             use std::os::unix::fs::PermissionsExt;
-            if let Ok(m) = std::fs::symlink_metadata(p) {
-                if m.is_dir() {
-                    let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755));
-                    if let Ok(rd) = std::fs::read_dir(p) {
-                        for e in rd.flatten() {
-                            fix(&e.path());
-                        }
+            if let Ok(m) = std::fs::symlink_metadata(p)
+                && m.is_dir()
+            {
+                let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755));
+                if let Ok(rd) = std::fs::read_dir(p) {
+                    for e in rd.flatten() {
+                        fix(&e.path());
                     }
                 }
             }

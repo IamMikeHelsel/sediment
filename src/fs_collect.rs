@@ -310,12 +310,11 @@ impl State<'_> {
         }
         if ft.is_dir() {
             let canon = std::fs::canonicalize(path).ok();
-            if self.options.follow_symlinks {
-                if let Some(c) = &canon {
-                    if self.ancestors.contains(c) {
-                        return self.warn(path, WarningKind::SymlinkLoop);
-                    }
-                }
+            if self.options.follow_symlinks
+                && let Some(c) = &canon
+                && self.ancestors.contains(c)
+            {
+                return self.warn(path, WarningKind::SymlinkLoop);
             }
             self.push(CollectedEntry {
                 name: name.clone(),

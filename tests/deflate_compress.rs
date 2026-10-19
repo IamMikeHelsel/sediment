@@ -107,3 +107,36 @@ fn python_zlib_inflates_output() {
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
+
+#[test]
+fn skewed_and_varied_inputs_round_trip() {
+    // Fibonacci-distributed symbols force Huffman depths past 15 before limiting.
+    let mut fib = vec![1usize, 1];
+    while fib.len() < 22 {
+        let n = fib[fib.len() - 1] + fib[fib.len() - 2];
+        fib.push(n);
+    }
+    let mut order = lcg(200_000, 11);
+    let mut data = Vec::new();
+    for (sym, &count) in fib.iter().enumerate() {
+        data.extend(std::iter::repeat_n(sym as u8 * 11, count));
+    }
+    // Shuffle deterministically so matches are short and literals dominate.
+    for i in (1..data.len()).rev() {
+        let j = (u32::from_le_bytes([order[i % 199_990], order[(i + 1) % 199_990], order[(i + 2) % 199_990], 0]) as usize) % (i + 1);
+        data.swap(i, j);
+    }
+    order.clear();
+    for level in [1u8, 6, 9] {
+        let c = deflate_compress(&data, level, usize::MAX).unwrap();
+        assert_eq!(inflate_raw(&c, data.len(), 100_000).unwrap(), data);
+    }
+    // Many small inputs over different alphabets.
+    for seed in 0..300u32 {
+        let len = (seed as usize * 37) % 1500;
+        let alpha = 1 + seed % 7;
+        let d: Vec<u8> = lcg(len, seed).into_iter().map(|b| b % (alpha as u8 * 3)).collect();
+        let c = deflate_compress(&d, (seed % 9 + 1) as u8, usize::MAX).unwrap();
+        assert_eq!(inflate_raw(&c, d.len(), 10_000).unwrap(), d, "seed {seed}");
+    }
+}
