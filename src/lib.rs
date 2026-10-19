@@ -17,3 +17,4 @@ pub mod lz77;
 pub mod deflate_stored;
 pub mod huffman_decode;
 pub mod inflate;
+pub mod deflate_dynamic;

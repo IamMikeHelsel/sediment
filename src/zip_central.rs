@@ -17,6 +17,14 @@ pub struct CentralRecord<'a> {
 }
 
 pub fn parse_central<'a>(directory: &'a [u8], offset: usize) -> Result<CentralRecord<'a>, ZipError> {
+    parse_central_impl(directory, offset, false)
+}
+
+pub fn parse_central_supported<'a>(directory: &'a [u8], offset: usize) -> Result<CentralRecord<'a>, ZipError> {
+    parse_central_impl(directory, offset, true)
+}
+
+fn parse_central_impl<'a>(directory: &'a [u8], offset: usize, allow_deflate: bool) -> Result<CentralRecord<'a>, ZipError> {
     let mut r = Reader::new(directory);
     r.skip(offset)?;
 
@@ -48,20 +56,34 @@ pub fn parse_central<'a>(directory: &'a [u8], offset: usize) -> Result<CentralRe
     if version_needed != 10 && version_needed != 20 {
         return Err(ZipError::Unsupported);
     }
-    if method != 0 {
+    if compressed_size == 0xFFFFFFFF || size == 0xFFFFFFFF || local_offset == 0xFFFFFFFF {
         return Err(ZipError::Unsupported);
     }
-    if flags & !0x0800 != 0 {
+    if method == 8 {
+        if !allow_deflate {
+            return Err(ZipError::Unsupported);
+        }
+        if version_needed != 20 {
+            return Err(ZipError::Unsupported);
+        }
+        if flags & !0x0806 != 0 {
+            return Err(ZipError::Unsupported);
+        }
+    } else if method == 0 {
+        if version_needed != 10 && version_needed != 20 {
+            return Err(ZipError::Unsupported);
+        }
+        if flags & !0x0800 != 0 {
+            return Err(ZipError::Unsupported);
+        }
+        if compressed_size != size {
+            return Err(ZipError::Invalid);
+        }
+    } else {
         return Err(ZipError::Unsupported);
     }
     if disk != 0 {
         return Err(ZipError::Unsupported);
-    }
-    if compressed_size == 0xFFFFFFFF || local_offset == 0xFFFFFFFF {
-        return Err(ZipError::Unsupported);
-    }
-    if compressed_size != size {
-        return Err(ZipError::Invalid);
     }
 
     let name = r.read_bytes(name_len as usize)?;
@@ -70,6 +92,8 @@ pub fn parse_central<'a>(directory: &'a [u8], offset: usize) -> Result<CentralRe
     }
 
     let extra_data = r.read_bytes(extra_len as usize)?;
+
+
     let mut extra_r = Reader::new(extra_data);
     let mut extra_consumed = 0;
     while extra_consumed < extra_len as usize {

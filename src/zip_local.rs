@@ -19,6 +19,10 @@ const HEADER_SIZE: usize = 30;
 const SIGNATURE: u32 = 0x04034b50;
 
 pub fn parse_local<'a>(region: &'a [u8], offset: usize) -> Result<LocalRecord<'a>, ZipError> {
+    parse_local_impl(region, offset, false)
+}
+
+fn parse_local_impl<'a>(region: &'a [u8], offset: usize, allow_deflate: bool) -> Result<LocalRecord<'a>, ZipError> {
     if offset > region.len() {
         return Err(ZipError::Truncated);
     }
@@ -30,17 +34,10 @@ pub fn parse_local<'a>(region: &'a [u8], offset: usize) -> Result<LocalRecord<'a
     }
 
     let version = r.read_u16_le()?;
-    if version != 10 && version != 20 {
-        return Err(ZipError::Unsupported);
-    }
-
     let flags = r.read_u16_le()?;
-    if flags & !0x0800 != 0 {
-        return Err(ZipError::Unsupported);
-    }
-
     let method = r.read_u16_le()?;
-    if method != 0 {
+
+    if !is_supported_version_method_flags(version, flags, method, allow_deflate) {
         return Err(ZipError::Unsupported);
     }
 
@@ -55,7 +52,7 @@ pub fn parse_local<'a>(region: &'a [u8], offset: usize) -> Result<LocalRecord<'a
         return Err(ZipError::Unsupported);
     }
 
-    if compressed_size != uncompressed_size {
+    if method == 0 && compressed_size != uncompressed_size {
         return Err(ZipError::Invalid);
     }
 
@@ -88,6 +85,32 @@ pub fn parse_local<'a>(region: &'a [u8], offset: usize) -> Result<LocalRecord<'a
         data_offset,
         end: payload_end,
     })
+}
+
+pub fn parse_local_supported<'a>(region: &'a [u8], offset: usize) -> Result<LocalRecord<'a>, ZipError> {
+    parse_local_impl(region, offset, true)
+}
+
+fn is_supported_version_method_flags(version: u16, flags: u16, method: u16, allow_deflate: bool) -> bool {
+    if method == 0 {
+        if version != 10 && version != 20 {
+            return false;
+        }
+        if flags & !0x0800 != 0 {
+            return false;
+        }
+        return true;
+    }
+    if method == 8 && allow_deflate {
+        if version != 20 {
+            return false;
+        }
+        if flags & !0x0806 != 0 {
+            return false;
+        }
+        return true;
+    }
+    false
 }
 
 fn validate_extra(data: &[u8]) -> Result<(), ZipError> {
