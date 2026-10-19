@@ -639,7 +639,12 @@ pub fn open_named<'a>(
 ) -> Result<Box<dyn ArchiveReader + 'a>, ReaderError> {
     let max_stream = to_usize(limits.max_total_size);
     match detect_format(bytes) {
-        Detected::Zip => Ok(Box::new(ZipReader::new(bytes, limits)?)),
+        Detected::Zip => match ZipReader::new(bytes, limits) {
+            Ok(r) => Ok(Box::new(r)),
+            // Legacy methods (Shrink/Implode), ZIP64, descriptors: wider reader.
+            Err(ReaderError::Unsupported) => crate::legacy_open::open_zip_fallback(bytes, limits),
+            Err(e) => Err(e),
+        },
         Detected::Tar | Detected::TarHeuristic => Ok(Box::new(TarReader::new(Cow::Borrowed(bytes), limits)?)),
         Detected::SevenZip => Ok(Box::new(SevenZReader::new(bytes, limits)?)),
         d @ (Detected::Gzip | Detected::Bzip2 | Detected::Xz) => {
@@ -665,7 +670,7 @@ pub fn open_named<'a>(
             }
             Ok(Box::new(StreamReader::new(format, member, data, mtime, crc)))
         }
-        Detected::LzmaAlone | Detected::Unknown => Err(ReaderError::Unsupported),
+        Detected::LzmaAlone | Detected::Unknown => crate::legacy_open::open_legacy(bytes, archive_name, limits),
     }
 }
 

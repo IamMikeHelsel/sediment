@@ -778,7 +778,7 @@ def main(outdir):
     expect = {
         "text1": t1, "text2": t2, "text5": t5, "mixed": mx, "mixed40k": mx[:40000],
         "mixed60k": mx[:60000], "mixed20k": mx[:20000], "mixed30k": mx[:30000],
-        "noise": nz, "noise16k": nz2, "small": small, "zeros5000": bytes(5000), "A": b"A", "empty": b"",
+        "noise": nz, "noise16k": nz2, "text1_3k": t1[:3000], "small": small, "zeros5000": bytes(5000), "A": b"A", "empty": b"",
     }
 
     # .Z (text9/text16 are byte-identical to the system `compress -b N`)
@@ -834,6 +834,13 @@ def main(outdir):
         (b"i8k2.bin", mx[:20000], 6, 2, implode_encode(mx[:20000], True, False)),
         (b"i4k3.txt", t2, 6, 4, implode_encode(t2, False, True)),
         (b"i8k3.bin", mx[:30000], 6, 6, implode_encode(mx[:30000], True, True)),
+    ])
+
+    # Small archive for the (expensive) mutation tests.
+    files["small_legacy.zip"] = zip_archive([
+        (b"s.txt", t1[:3000], 1, 0, shrink_encode(t1[:3000])),
+        (b"i2.txt", t1[:3000], 6, 0, implode_encode(t1[:3000], False, False)),
+        (b"i3.txt", t1[:3000], 6, 6, implode_encode(t1[:3000], True, True)),
     ])
 
     manifest = "".join(f"{k} {len(v)} {zlib.crc32(v) & 0xFFFFFFFF:08x}\n" for k, v in sorted(expect.items()))

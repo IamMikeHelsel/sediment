@@ -47,6 +47,12 @@ pub enum ArchiveFormat {
     Xz,
     Bzip2,
     SevenZ,
+    /// LHA/LZH (see `legacy_open`).
+    Lzh,
+    /// ARJ (see `legacy_open`).
+    Arj,
+    /// Unix `compress` single stream (see `legacy_open`).
+    CompressZ,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
