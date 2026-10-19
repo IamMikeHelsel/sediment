@@ -33,3 +33,5 @@ pub mod crc32_bzip2;
 pub mod gzip_encode;
 pub mod zlib_encode;
 pub mod xz_stream;
+pub mod zip_dos_time;
+pub mod bit_writer;
