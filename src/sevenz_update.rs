@@ -480,7 +480,8 @@ pub fn apply_7z(
             (Some(f), Some(k)) if dirty[f] => {
                 let arch = archive.as_ref().ok_or(UpdateError::InvalidArchive)?;
                 if decoded.as_ref().is_none_or(|(df, _)| *df != f) {
-                    decoded = None;
+                    // Release the previous folder before decoding the next.
+                    drop(decoded.take());
                     decoded = Some((f, arch.extract_folder(f, &codec).map_err(map_read)?));
                 }
                 let parts = &decoded.as_ref().ok_or(UpdateError::InvalidArchive)?.1;

@@ -60,8 +60,6 @@ struct Meta {
     start: usize,
     /// End of the header's data (unpadded).
     data_end: usize,
-    /// End of the padded data.
-    end: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -103,7 +101,7 @@ fn parse(tar: &[u8], limits: &UpdateLimits) -> Result<Parsed, UpdateError> {
             if data_end > main || mend > main {
                 return Err(UpdateError::InvalidArchive);
             }
-            metas.push(Meta { typeflag: tf, start: pos, data_end, end: mend });
+            metas.push(Meta { typeflag: tf, start: pos, data_end });
             pos = mend;
         }
         if pos != main {
@@ -219,7 +217,10 @@ fn push_meta(out: &mut Vec<u8>, header: &[u8], data: &[u8]) -> Result<(), Update
 }
 
 /// Split pax records into (keyword, raw record) pairs.
-fn pax_records(data: &[u8]) -> Result<Vec<(&[u8], &[u8])>, UpdateError> {
+/// (keyword, raw record) of one pax record.
+type PaxRecord<'a> = (&'a [u8], &'a [u8]);
+
+fn pax_records(data: &[u8]) -> Result<Vec<PaxRecord<'_>>, UpdateError> {
     let mut out = Vec::new();
     let mut rest = data;
     while !rest.is_empty() {

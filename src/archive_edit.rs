@@ -73,7 +73,7 @@ pub fn open_source(bytes: &[u8], max_tar: usize) -> Result<EditSource<'_>, Updat
                 return Ok(EditSource { format: EditFormat::Zip, data: Cow::Borrowed(bytes) });
             }
             // An empty tar archive is all zero blocks.
-            if !bytes.is_empty() && bytes.len() % 512 == 0 && bytes.iter().all(|&b| b == 0) {
+            if !bytes.is_empty() && bytes.len().is_multiple_of(512) && bytes.iter().all(|&b| b == 0) {
                 return Ok(EditSource { format: EditFormat::Tar(Compression::None), data: Cow::Borrowed(bytes) });
             }
             return Err(UpdateError::Unsupported);
