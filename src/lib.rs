@@ -36,3 +36,6 @@ pub mod xz_stream;
 pub mod zip_dos_time;
 pub mod bit_writer;
 pub mod pax_record_write;
+pub mod lzma_decode;
+pub mod lzma2_decode;
+pub mod xz_decode;
