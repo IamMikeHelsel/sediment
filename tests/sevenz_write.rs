@@ -297,11 +297,14 @@ fn listing_matches_7zz_oracle() {
                     "Size" => e.size.to_string(),
                     "Attributes" => fmt_attr(e.attributes),
                     "CRC" => e.crc.map(|c| format!("{c:08X}")).unwrap_or_default(),
+                    // 7-Zip shows the enclosing block for an empty file that
+                    // sits between two files of one solid block; only
+                    // entries with data have a block of their own.
+                    "Block" if e.folder_index.is_none() => continue,
                     "Block" => e.folder_index.map(|b| b.to_string()).unwrap_or_default(),
                     "Modified" => {
-                        let (s, _) = filetime_to_unix(e.mtime.unwrap());
-                        assert_eq!(s, MTIME);
-                        v.clone()
+                        assert_eq!(filetime_to_unix(e.mtime.unwrap()), (MTIME, 0));
+                        "2024-03-05 06:07:08.0000000".to_string()
                     }
                     _ => continue,
                 };
@@ -785,4 +788,79 @@ fn cli_creates_archive() {
     assert_eq!(run_add_7z(&os(&["-mx=11", "o.7z", "x"])), 2);
     assert_eq!(run_add_7z(&[arg(&d.join("y.7z")), arg(&d.join("missing"))]), 1);
     let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Larger archives for the external oracle when `SEVENZ_WRITE_STRESS=<dir>`
+/// is set (see `tests/gen/sevenz_write_oracle.sh`): ~24 MiB of mixed data in
+/// many files, several solid blocks, all methods and BCJ, written with the
+/// sources under `<dir>/src`.
+#[test]
+fn stress_regen() {
+    let Ok(dir) = std::env::var("SEVENZ_WRITE_STRESS") else { return };
+    let mut owned = Vec::new();
+    let mut x = 0x9e3779b9u32;
+    let mut rnd = |n: usize| -> Vec<u8> {
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                x as u8
+            })
+            .collect()
+    };
+    for i in 0..400usize {
+        let name = format!("tree/d{:02}/f{i:04}.{}", i % 23, ["txt", "bin", "exe", "dat"][i % 4]);
+        let n = (i * 7919) % 120_000;
+        let data = match i % 4 {
+            0 => (0..n).map(|k| b"lorem ipsum dolor sit amet "[k % 27]).collect(),
+            1 => rnd(n),
+            2 => x86_like(n),
+            _ => {
+                let mut v = rnd(n / 8);
+                v.extend(std::iter::repeat_n(7u8, n - n / 8));
+                v
+            }
+        };
+        owned.push(Owned { name, kind: EntryKind::File, data, mode: 0o644, link: vec![] });
+    }
+    owned.push(Owned { name: "tree/big.bin".into(), kind: EntryKind::File, data: x86_like(9 << 20), mode: 0o755, link: vec![] });
+    owned.sort_by(|a, b| a.name.cmp(&b.name));
+    let e = entries(&owned);
+    std::fs::create_dir_all(format!("{dir}/src")).unwrap();
+    for o in &owned {
+        let p = format!("{dir}/src/{}", o.name);
+        std::fs::create_dir_all(std::path::Path::new(&p).parent().unwrap()).unwrap();
+        std::fs::write(&p, &o.data).unwrap();
+    }
+    let mut cases: Vec<(&str, SevenZWriteOptions)> = Vec::new();
+    for (name, level) in [("s_mx1", 1u8), ("s_mx5", 5), ("s_mx9", 9), ("s_mx0", 0)] {
+        let mut o = SevenZWriteOptions::level(level).unwrap();
+        o.solid_block_bytes = 4 << 20;
+        cases.push((name, o));
+    }
+    let mut o = SevenZWriteOptions::level(5).unwrap();
+    o.method = SevenZMethod::Lzma;
+    o.filter = Some(BcjArch::X86);
+    o.solid = false;
+    cases.push(("s_lzma_bcj_nonsolid", o));
+    let mut o = SevenZWriteOptions::level(3).unwrap();
+    o.filter = Some(BcjArch::Arm64);
+    o.compress_header = false;
+    cases.push(("s_lzma2_arm64_plain", o));
+    for (name, o) in cases {
+        let t = std::time::Instant::now();
+        let b = create_7z(&e, &o, wl()).unwrap();
+        eprintln!("{name}: {} bytes in {:?}", b.len(), t.elapsed());
+        check_ok(&b, &owned);
+        std::fs::write(format!("{dir}/{name}.7z"), b).unwrap();
+    }
+}
+
+fn check_ok(b: &[u8], owned: &[Owned]) {
+    let ar = SevenZArchive::open(b, &Dec, lim()).unwrap();
+    assert_eq!(ar.entries().len(), owned.len());
+    for fi in 0..ar.folders().len() {
+        ar.extract_folder(fi, &Dec).unwrap();
+    }
 }
