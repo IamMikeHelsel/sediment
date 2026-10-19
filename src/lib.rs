@@ -78,3 +78,7 @@ pub mod lzma_encode;
 pub mod lzma2_encode;
 pub mod xz_encode;
 pub mod archive_open;
+pub mod hash_multi;
+pub mod cli_hash;
+pub mod bench;
+pub mod cli_bench;

@@ -7,6 +7,8 @@
 //!   x [switches] ARCHIVE      extract with full paths
 //!   e [switches] ARCHIVE      extract without directory structure
 //!   a [switches] ARCHIVE PATHS...  create an archive (see `cli_add`)
+//!   h [-scrc<METHOD>]... PATHS...  hash files (see `cli_hash`)
+//!   b [ITERATIONS] [switches]      benchmark (see `cli_bench`)
 //!   list|test ARCHIVE         original ZIP-only commands (frozen output)
 //! Readable formats for l/t/x/e: zip, tar, gzip/bzip2/xz single streams,
 //!   tar.gz/tgz, tar.bz2/tbz2/tbz, tar.xz/txz and 7z (see `archive_open`).
@@ -26,6 +28,8 @@ use sediment_engine::archive_name::escape_name;
 use sediment_engine::archive_open::open_named;
 use sediment_engine::archive_reader::{ArchiveReader, ReaderError, ReaderLimits};
 use sediment_engine::cli_add::run_add;
+use sediment_engine::cli_bench::run_bench;
+use sediment_engine::cli_hash::run_hash;
 use sediment_engine::extract_fs::{execute_plan, ExtractOptions, OverwritePolicy, SymlinkPolicy};
 use sediment_engine::extract_plan::{
     normalize_path, plan_extraction, EntryKind, Plan, PlanKind, PlanOptions, PlanWarning, PlannedEntry,
@@ -90,6 +94,10 @@ fn main() {
         cmd_extract(cmd == "e", rest);
     } else if cmd == "a" {
         process::exit(run_add(&rest));
+    } else if cmd == "h" {
+        process::exit(run_hash(&rest));
+    } else if cmd == "b" {
+        process::exit(run_bench(&rest));
     } else {
         err("unknown command", 2);
     }
