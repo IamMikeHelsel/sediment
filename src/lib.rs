@@ -43,3 +43,6 @@ pub mod sevenz_read;
 pub mod filter_bcj;
 pub mod filter_delta;
 pub mod filter_swap;
+pub mod lzma_decode;
+pub mod lzma2_decode;
+pub mod xz_decode;
