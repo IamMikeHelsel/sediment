@@ -18,3 +18,4 @@ pub mod deflate_stored;
 pub mod huffman_decode;
 pub mod inflate;
 pub mod deflate_dynamic;
+pub mod zip_decode;
