@@ -435,8 +435,8 @@ fn single_file_library_api() {
     assert_eq!(read_single_input(t, 10), Err(SingleError::NotRegularFile));
     assert_eq!(build_single(&t.join("o.gz"), &[], Compression::Gzip, 5), Err(SingleError::InputCount));
     assert_eq!(build_single(&t.join("o.gz"), &[p.clone(), p.clone()], Compression::Gzip, 5), Err(SingleError::InputCount));
-    assert_eq!(build_single(&p, &[p.clone()], Compression::Gzip, 5), Err(SingleError::SameFile));
-    let (c, n) = build_single(&t.join("o.bz2"), &[p.clone()], Compression::Bzip2, 9).unwrap();
+    assert_eq!(build_single(&p, std::slice::from_ref(&p), Compression::Gzip, 5), Err(SingleError::SameFile));
+    let (c, n) = build_single(&t.join("o.bz2"), std::slice::from_ref(&p), Compression::Bzip2, 9).unwrap();
     assert_eq!(n, 1000);
     assert_eq!(decode_bzip2(&c, 1000).unwrap(), vec![9u8; 1000]);
     assert_eq!(compress_single(Compression::Xz, b"x", 10), Err(SingleError::InvalidLevel));
