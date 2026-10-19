@@ -36,3 +36,6 @@ pub mod xz_stream;
 pub mod zip_dos_time;
 pub mod bit_writer;
 pub mod pax_record_write;
+pub mod filter_bcj;
+pub mod filter_delta;
+pub mod filter_swap;
