@@ -47,3 +47,5 @@ pub mod lzma_decode;
 pub mod lzma2_decode;
 pub mod xz_decode;
 pub mod lzma_encode;
+pub mod lzma2_encode;
+pub mod xz_encode;
