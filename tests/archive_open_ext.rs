@@ -153,7 +153,8 @@ fn cli_stdin() {
         assert!(o.status.success(), "{name}");
         assert!(String::from_utf8_lossy(&o.stdout).contains(want), "{name}");
     }
-    let r = sediment_engine::archive_open_ext::open_stdin_ext(&fx("zstd", "text.l3.zst"), ReaderLimits::default()).unwrap();
+    let b = fx("zstd", "text.l3.zst");
+    let r = sediment_engine::archive_open_ext::open_stdin_ext(&b, ReaderLimits::default()).unwrap();
     assert_eq!(r.format(), ArchiveFormat::Zstd);
     assert_eq!(r.entries()[0].path, b"data");
 }
