@@ -472,12 +472,12 @@ fn container(format: OutputFormat, entries: &[ArchiveEntry<'_>], level: u8) -> R
 
 fn build_from_paths(a: &AddStdioArgs, err: &mut dyn Write) -> Result<Built, String> {
     let mut exclude = Vec::new();
-    if let Some(p) = &a.archive {
-        if !a.to_stdout {
-            exclude.push(p.clone());
-            if !a.volumes.is_empty() {
-                exclude.extend(existing_volumes(p));
-            }
+    if let Some(p) = &a.archive
+        && !a.to_stdout
+    {
+        exclude.push(p.clone());
+        if !a.volumes.is_empty() {
+            exclude.extend(existing_volumes(p));
         }
     }
     let options = CollectOptions { follow_symlinks: a.follow_symlinks, strict: false, exclude };
