@@ -141,3 +141,19 @@ fn cli_list_test_extract() {
     let o = Command::new(BIN).arg("t").arg(fx_path("zstd", "bad.checksum.zst")).output().unwrap();
     assert!(!o.status.success());
 }
+
+#[test]
+fn cli_stdin() {
+    use std::io::Write;
+    use std::process::Stdio;
+    for (area, name, want) in [("zstd", "tree.tar.zst", "a/hello.txt"), ("wim", "xpress.wim", "dir/sub/nested.txt")] {
+        let mut c = Command::new(BIN).args(["l", "-si"]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        c.stdin.take().unwrap().write_all(&fx(area, name)).unwrap();
+        let o = c.wait_with_output().unwrap();
+        assert!(o.status.success(), "{name}");
+        assert!(String::from_utf8_lossy(&o.stdout).contains(want), "{name}");
+    }
+    let r = sediment_engine::archive_open_ext::open_stdin_ext(&fx("zstd", "text.l3.zst"), ReaderLimits::default()).unwrap();
+    assert_eq!(r.format(), ArchiveFormat::Zstd);
+    assert_eq!(r.entries()[0].path, b"data");
+}

@@ -129,7 +129,7 @@ impl Drop for TempDir {
 /// `python3` if it is available (tests that need the oracle skip otherwise).
 pub fn python() -> Option<&'static str> {
     Command::new("python3")
-        .args(["-I", "-c", "import zipfile, tarfile, gzip, zlib"])
+        .args(["-I", "-c", "import zipfile, tarfile, gzip, zlib, bz2, lzma"])
         .output()
         .ok()
         .filter(|o| o.status.success())

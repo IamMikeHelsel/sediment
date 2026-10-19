@@ -18,6 +18,7 @@
 
 use std::borrow::Cow;
 
+use crate::archive_detect::{ArchiveFormat as Detected, detect_format};
 use crate::archive_open::{StreamReader, TarReader, open_named};
 use crate::archive_reader::{ArchiveFormat, ArchiveReader, ReaderError, ReaderLimits};
 use crate::extract_plan::{EntryKind, PlannedEntry};
@@ -214,6 +215,28 @@ pub fn open_named_ext<'a>(
         return Ok(Box::new(StreamReader::new(ArchiveFormat::Zstd, member, data, None, None)));
     }
     open_named(bytes, archive_name, limits)
+}
+
+/// Like [`open_named_ext`] for an archive read from standard input (no
+/// file name): a zstd stream is a tar archive when its content is one
+/// (ustar magic or a valid tar header checksum), as for gzip/bzip2/xz in
+/// [`crate::cli_stdio::open_stdin_bytes`], which handles all other formats.
+pub fn open_stdin_ext<'a>(bytes: &'a [u8], limits: ReaderLimits) -> Result<Box<dyn ArchiveReader + 'a>, ReaderError> {
+    if is_wim(bytes) {
+        return Ok(Box::new(WimReader::new(bytes, limits)?));
+    }
+    if is_zstd(bytes) {
+        let max = usize::try_from(limits.max_total_size).unwrap_or(usize::MAX);
+        let data = decode_zstd(bytes, max)?;
+        if matches!(detect_format(&data), Detected::Tar | Detected::TarHeuristic) {
+            return Ok(Box::new(TarReader::new(Cow::Owned(data), limits)?));
+        }
+        if data.len() as u64 > limits.max_entry_size {
+            return Err(ReaderError::LimitExceeded);
+        }
+        return Ok(Box::new(StreamReader::new(ArchiveFormat::Zstd, b"data".to_vec(), data, None, None)));
+    }
+    crate::cli_stdio::open_stdin_bytes(bytes, limits)
 }
 
 #[cfg(test)]

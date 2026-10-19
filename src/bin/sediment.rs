@@ -15,6 +15,10 @@
 //!   -aoa overwrite all, -aos skip existing, -aou auto-rename new files,
 //!   -snl create symbolic links (default: skip them with a warning),
 //!   -- end of switches.
+//! Streams and volumes (see `cli_stdio`): `-si` reads the archive from
+//!   standard input (l/t/x/e), `-so` writes file data to standard output
+//!   instead of disk (x/e), and an archive named `*.001` is read as split
+//!   volumes. `a` with -si/-so/-v/-t/-an is handled by `cli_stdio`.
 //! Exit codes: 0 success; 1 warning (some members not extracted) or, for
 //!   `list`/`test`, any failure; 2 fatal error or usage error. `a` keeps the
 //!   codes documented in `cli_add` (1 fatal, 2 usage, 3 inputs skipped).
@@ -24,9 +28,13 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use sediment_engine::archive_name::escape_name;
-use sediment_engine::archive_open_ext::open_named_ext;
+use sediment_engine::archive_open_ext::{open_named_ext, open_stdin_ext};
 use sediment_engine::archive_reader::{ArchiveReader, ReaderError, ReaderLimits};
 use sediment_engine::cli_add::run_add;
+use sediment_engine::cli_stdio::{
+    STDIN_LIMIT_ENV, StdioError, read_limited, run_add_stdio, stdin_limit, wants_stdio, write_files,
+};
+use sediment_engine::volume_io::{VolumeError, first_volume_base, read_volumes};
 use sediment_engine::extract_fs::{execute_plan, ExtractOptions, OverwritePolicy, SymlinkPolicy};
 use sediment_engine::extract_plan::{
     normalize_path, plan_extraction, EntryKind, Plan, PlanKind, PlanOptions, PlanWarning, PlannedEntry,
@@ -79,9 +87,9 @@ fn main() {
     if cmd == "list" || cmd == "test" {
         legacy(&cmd, rest);
     } else if cmd == "l" || cmd == "t" {
-        let path = single_path(rest);
-        let buf = read_archive(Path::new(&path), MAX_ARCHIVE);
-        let reader = open_reader(&buf, Path::new(&path));
+        let src = parse_source_args(rest);
+        let (buf, name) = load_archive(src.as_deref());
+        let reader = open_input(&buf, &name, src.is_none());
         if cmd == "l" {
             cmd_list(reader.as_ref());
         } else {
@@ -90,7 +98,7 @@ fn main() {
     } else if cmd == "x" || cmd == "e" {
         cmd_extract(cmd == "e", rest);
     } else if cmd == "a" {
-        process::exit(run_add(&rest));
+        process::exit(if wants_stdio(&rest) { run_add_stdio(&rest) } else { run_add(&rest) });
     } else {
         err("unknown command", 2);
     }
@@ -213,8 +221,65 @@ fn file_name_bytes(p: &Path) -> Vec<u8> {
     p.file_name().map(|n| n.as_encoded_bytes().to_vec()).unwrap_or_default()
 }
 
-fn open_reader<'a>(buf: &'a [u8], path: &Path) -> Box<dyn ArchiveReader + 'a> {
-    match open_named_ext(buf, &file_name_bytes(path), ReaderLimits::default()) {
+/// Archive arguments for `l`/`t`: one path, or `-si` for standard input.
+/// Returns `None` for standard input.
+fn parse_source_args(rest: Vec<OsString>) -> Option<OsString> {
+    let mut stdin = false;
+    let mut path = None;
+    let mut switches = true;
+    for a in rest {
+        let b = a.as_encoded_bytes();
+        if switches && b == b"--" {
+            switches = false;
+        } else if switches && b == b"-si" {
+            stdin = true;
+        } else if switches && b.len() > 1 && b[0] == b'-' {
+            err("unknown switch", 2);
+        } else if path.replace(a).is_some() {
+            err("too many arguments", 2);
+        }
+    }
+    match (stdin, path) {
+        (true, None) => None,
+        (false, Some(p)) => Some(p),
+        (true, Some(_)) => err("archive path cannot be combined with -si", 2),
+        (false, None) => err("missing archive path", 2),
+    }
+}
+
+/// Read the archive bytes and its file name: standard input when `path` is
+/// `None` (bounded by the stdin limit), split volumes for `*.001`, else the
+/// file itself.
+fn load_archive(path: Option<&OsStr>) -> (Vec<u8>, Vec<u8>) {
+    let Some(path) = path else {
+        let limit = match stdin_limit(std::env::var_os(STDIN_LIMIT_ENV).as_deref()) {
+            Ok(l) => l,
+            Err(_) => err("invalid SEDIMENT_STDIN_LIMIT", EXIT_FATAL),
+        };
+        return match read_limited(io::stdin().lock(), limit) {
+            Ok(b) => (b, Vec::new()),
+            Err(StdioError::LimitExceeded) => err("standard input exceeds the size limit", EXIT_FATAL),
+            Err(StdioError::Allocation) => err("allocation failed", EXIT_FATAL),
+            Err(_) => err("read error", EXIT_FATAL),
+        };
+    };
+    let p = Path::new(path);
+    if let Some(base) = first_volume_base(p) {
+        return match read_volumes(&base, MAX_ARCHIVE) {
+            Ok((b, _)) => (b, file_name_bytes(&base)),
+            Err(VolumeError::NotFound) => err("cannot open file", EXIT_FATAL),
+            Err(VolumeError::LimitExceeded | VolumeError::TooManyVolumes) => err("file too large", EXIT_FATAL),
+            Err(VolumeError::Allocation) => err("allocation failed", EXIT_FATAL),
+            Err(VolumeError::NotAFile) => err("invalid file or size limit", EXIT_FATAL),
+            Err(_) => err("read error", EXIT_FATAL),
+        };
+    }
+    (read_archive(p, MAX_ARCHIVE), file_name_bytes(p))
+}
+
+fn open_input<'a>(buf: &'a [u8], name: &[u8], stdin: bool) -> Box<dyn ArchiveReader + 'a> {
+    let r = if stdin { open_stdin_ext(buf, ReaderLimits::default()) } else { open_named_ext(buf, name, ReaderLimits::default()) };
+    match r {
         Ok(r) => r,
         Err(ReaderError::Unsupported) => err("unsupported archive format", EXIT_FATAL),
         Err(ReaderError::CrcMismatch) => err("data error (checksum mismatch)", EXIT_FATAL),
@@ -272,7 +337,9 @@ fn cmd_test(reader: &dyn ArchiveReader) {
 }
 
 struct ExtractArgs {
-    archive: OsString,
+    /// `None` with `-si`.
+    archive: Option<OsString>,
+    to_stdout: bool,
     out_dir: PathBuf,
     overwrite: OverwritePolicy,
     symlinks: SymlinkPolicy,
@@ -296,11 +363,15 @@ fn parse_extract_args(rest: Vec<OsString>) -> ExtractArgs {
     let mut yes = false;
     let mut symlinks = SymlinkPolicy::Skip;
     let mut switches = true;
+    let mut stdin = false;
+    let mut to_stdout = false;
     for a in rest {
         let bytes = a.as_encoded_bytes();
         if switches && bytes.first() == Some(&b'-') && bytes.len() > 1 {
             match bytes {
                 b"--" => switches = false,
+                b"-si" => stdin = true,
+                b"-so" => to_stdout = true,
                 b"-y" => yes = true,
                 b"-aoa" => overwrite = Some(OverwritePolicy::Overwrite),
                 b"-aos" => overwrite = Some(OverwritePolicy::Skip),
@@ -324,12 +395,14 @@ fn parse_extract_args(rest: Vec<OsString>) -> ExtractArgs {
         }
         archive = Some(a);
     }
-    let archive = match archive {
-        Some(a) => a,
-        None => err("missing archive path", 2),
+    let archive = match (stdin, archive) {
+        (true, None) => None,
+        (false, Some(a)) => Some(a),
+        (true, Some(_)) => err("archive path cannot be combined with -si", 2),
+        (false, None) => err("missing archive path", 2),
     };
     let overwrite = overwrite.unwrap_or(if yes { OverwritePolicy::Overwrite } else { OverwritePolicy::Error });
-    ExtractArgs { archive, out_dir, overwrite, symlinks }
+    ExtractArgs { archive, to_stdout, out_dir, overwrite, symlinks }
 }
 
 fn last_component(path: &[u8]) -> Vec<u8> {
@@ -378,8 +451,19 @@ fn remap(plan: &mut Plan, map: &[usize]) {
 
 fn cmd_extract(flat: bool, rest: Vec<OsString>) {
     let args = parse_extract_args(rest);
-    let buf = read_archive(Path::new(&args.archive), MAX_ARCHIVE);
-    let reader = open_reader(&buf, Path::new(&args.archive));
+    let (buf, name) = load_archive(args.archive.as_deref());
+    let reader = open_input(&buf, &name, args.archive.is_none());
+    if args.to_stdout {
+        let mut out = io::stdout().lock();
+        match write_files(reader.as_ref(), &mut out) {
+            Ok(_) => return,
+            Err(StdioError::BrokenPipe) => process::exit(EXIT_WARNING),
+            Err(StdioError::Source(ReaderError::Unsupported)) => err("unsupported compression method", EXIT_FATAL),
+            Err(StdioError::Source(_) | StdioError::SizeMismatch) => err("data error", EXIT_FATAL),
+            Err(StdioError::Allocation) => err("allocation failed", EXIT_FATAL),
+            Err(_) => err("write error", EXIT_FATAL),
+        }
+    }
     let entries = reader.entries();
     let (planned, map) = if flat {
         flatten(entries)

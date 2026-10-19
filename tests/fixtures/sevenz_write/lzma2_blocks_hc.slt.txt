@@ -1,0 +1,129 @@
+
+7-Zip (z) 26.04 (arm64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-10-05
+ 64-bit arm_v:8-A locale=C.UTF-8 Threads:20 OPEN_MAX:32768, ASM
+
+Scanning the drive for archives:
+1 file, 1724 bytes (2 KiB)
+
+Listing archive: lzma2_blocks_hc.7z
+
+--
+Path = lzma2_blocks_hc.7z
+Type = 7z
+Physical Size = 1724
+Headers Size = 295
+Method = LZMA2:6k
+Solid = +
+Blocks = 4
+
+----------
+Path = dir
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = D drwxr-xr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = dir/sub
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = D drwxr-xr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = emptydir
+Size = 0
+Packed Size = 0
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = D drwxr-xr-x
+CRC = 
+Encrypted = -
+Method = 
+Block = 
+
+Path = a.txt
+Size = 1620
+Packed Size = 140
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = A -rw-r--r--
+CRC = 989E5E02
+Encrypted = -
+Method = LZMA2:12
+Block = 0
+
+Path = b.bin
+Size = 700
+Packed Size = 284
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = A -rw-------
+CRC = 67C52D4F
+Encrypted = -
+Method = LZMA2:12
+Block = 1
+
+Path = dir/sub/nested.txt
+Size = 7
+Packed Size = 
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = A -rw-r--r--
+CRC = EBAB958D
+Encrypted = -
+Method = LZMA2:12
+Block = 1
+
+Path = empty.txt
+Size = 0
+Packed Size = 
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = A -rw-r--r--
+CRC = 
+Encrypted = -
+Method = LZMA2:12
+Block = 1
+
+Path = hello.txt
+Size = 11
+Packed Size = 
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = A -rw-r-----
+CRC = 99504610
+Encrypted = -
+Method = LZMA2:12
+Block = 1
+
+Path = héllo_日本.txt
+Size = 13
+Packed Size = 
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = RA -r--r--r--
+CRC = 6C14D048
+Encrypted = -
+Method = LZMA2:12
+Block = 1
+
+Path = prog.bin
+Size = 5000
+Packed Size = 992
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = A -rwxr-xr-x
+CRC = 3D336F9A
+Encrypted = -
+Method = LZMA2:6k
+Block = 2
+
+Path = link
+Size = 9
+Packed Size = 13
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = A lrwxrwxrwx
+CRC = 1260CEBB
+Encrypted = -
+Method = LZMA2:12
+Block = 3
+
