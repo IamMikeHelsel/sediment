@@ -674,7 +674,13 @@ pub fn open_named<'a>(
                 (None, None, None)
             };
             let member = header_name.unwrap_or_else(|| stream_member_name(archive_name));
-            let data = decompress(format, bytes, max_stream)?;
+            // Only a tar or cpio payload may exceed one entry; anything else
+            // becomes a single entry, so stop decoding at the entry limit.
+            let container = is_compressed_tar_name(archive_name)
+                || ends_with_ci(&member, b".tar")
+                || ends_with_ci(&member, b".cpio");
+            let cap = if container { max_stream } else { to_usize(limits.max_entry_size.min(limits.max_total_size)) };
+            let data = decompress(format, bytes, cap)?;
             if is_compressed_tar_name(archive_name) || ends_with_ci(&member, b".tar") {
                 return Ok(Box::new(TarReader::new(Cow::Owned(data), limits)?));
             }

@@ -203,10 +203,13 @@ pub fn open_named_ext<'a>(
         return Ok(Box::new(WimReader::new(bytes, limits)?));
     }
     if is_zstd(bytes) {
-        let max = usize::try_from(limits.max_total_size).unwrap_or(usize::MAX);
-        let data = decode_zstd(bytes, max)?;
         let member = zstd_member_name(archive_name);
-        if is_zstd_tar_name(archive_name) || ends_with_ci(&member, b".tar") {
+        let is_tar = is_zstd_tar_name(archive_name) || ends_with_ci(&member, b".tar");
+        // A non-tar stream is one entry: stop decoding at the entry limit.
+        let cap = if is_tar { limits.max_total_size } else { limits.max_entry_size.min(limits.max_total_size) };
+        let max = usize::try_from(cap).unwrap_or(usize::MAX);
+        let data = decode_zstd(bytes, max)?;
+        if is_tar {
             return Ok(Box::new(TarReader::new(Cow::Owned(data), limits)?));
         }
         if data.len() as u64 > limits.max_entry_size {
