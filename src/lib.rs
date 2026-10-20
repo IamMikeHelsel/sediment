@@ -132,3 +132,5 @@ pub mod zipcrypto;
 pub mod zlib_encode;
 pub mod zlib_wrapper;
 pub mod zstd_decode;
+pub mod xpress_huffman_encode;
+pub mod wim_write;
