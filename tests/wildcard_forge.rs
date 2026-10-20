@@ -100,3 +100,63 @@ fn path_case_insensitive() {
     assert!(!match_path("SRC/*.RS", "src/lib.rs", false, true));
     assert!(match_path("*.RS", "a/B/lib.rs", true, false));
 }
+
+// Regression: split_components used char indices as byte indices and
+// panicked on multibyte names (e.g. "éé/x.txt").
+#[test]
+fn path_multibyte_components_no_panic() {
+    assert!(match_path("*.txt", "éé/x.txt", true, true));
+    assert!(match_path("*.txt", "a.txt", true, true));
+    assert!(!match_path("*.txt", "éé/x.txt", false, true));
+    assert!(match_path("éé/*.txt", "éé/x.txt", false, true));
+    assert!(match_path("é?/x.txt", "éé/x.txt", false, true));
+    // multibyte before, between and after separators, both separator kinds
+    assert!(match_path("日本/中/ü.txt", "日本/中/ü.txt", false, true));
+    assert!(match_path("日本\\中\\ü.txt", "日本/中/ü.txt", false, true));
+    assert!(match_path("中", "日本\\中\\ü.txt", true, true));
+    assert!(match_path("ü*", "日本/中/ü.txt", true, true));
+    assert!(match_path("*", "x/ü", true, true));
+    assert!(match_path("ü", "ü/", true, true));
+    assert!(match_path("ü", "./ü", false, true));
+    assert!(!match_path("日本/ü.txt", "日本/中/ü.txt", false, true));
+    assert!(match_path("ÄÖ/*", "äö/x", false, false));
+}
+
+fn ref_split(s: &str) -> Vec<String> {
+    s.split(['/', '\\'])
+        .filter(|c| !c.is_empty() && *c != ".")
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn fuzz_random_utf8_paths() {
+    let alphabet: &[char] = &['a', 'Z', '.', '/', '\\', '*', '?', 'é', 'ü', '日', '本', '😀', '\u{0301}', 'Σ'];
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for _ in 0..20_000 {
+        let mut rand_str = |max: u64| -> String {
+            let len = next() % max;
+            (0..len).map(|_| alphabet[(next() % alphabet.len() as u64) as usize]).collect()
+        };
+        let path: String = rand_str(12).replace(['*', '?'], "");
+        let pat = rand_str(8);
+        for &(rec, cs) in &[(true, true), (false, true), (true, false), (false, false)] {
+            let got = match_path(&pat, &path, rec, cs);
+            // Reference: component-wise match over a std split.
+            let pc = ref_split(&pat);
+            let nc = ref_split(&path);
+            let anchored = !rec || pat.contains(['/', '\\']);
+            let want = !pc.is_empty() && pc.len() <= nc.len() && {
+                let last = if anchored { 0 } else { nc.len() - pc.len() };
+                (0..=last).any(|s| pc.iter().zip(&nc[s..]).all(|(p, n)| match_name(p, n, cs)))
+            };
+            assert_eq!(got, want, "pattern {pat:?} path {path:?} rec {rec} cs {cs}");
+        }
+    }
+}
