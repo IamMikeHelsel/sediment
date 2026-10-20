@@ -78,3 +78,25 @@ fn truncation_and_corruption_never_panic() {
         }
     }
 }
+
+#[test]
+fn zip_method_99_without_aes_is_lzfse() {
+    use sediment_engine::archive_open_ext::open_named_ext;
+    use sediment_engine::archive_reader::ReaderLimits;
+    let bytes = std::fs::read(dir().join("goodput_lzfse.zip")).unwrap();
+    let r = open_named_ext(&bytes, b"goodput_lzfse.zip", ReaderLimits::default()).unwrap();
+    let mut got = std::collections::BTreeMap::new();
+    for (i, e) in r.entries().iter().enumerate() {
+        got.insert(String::from_utf8(e.path.clone()).unwrap(), r.read(i).unwrap());
+    }
+    assert_eq!(got["a.txt"], b"hello sediment\n".repeat(50));
+    assert_eq!(got["bin/data.bin"], (0..=255u8).collect::<Vec<_>>().repeat(40));
+    assert_eq!(got["caf\u{e9}.txt"], b"unicode ok\n");
+    assert_eq!(got["empty"], b"");
+    // Corrupt one payload byte: CRC or decoder error, never a panic.
+    let mut bad = bytes.clone();
+    let at = bad.windows(4).position(|w| w == b"bvx2").unwrap() + 40;
+    bad[at] ^= 0x55;
+    let r = open_named_ext(&bad, b"x.zip", ReaderLimits::default()).unwrap();
+    assert!((0..r.entries().len()).any(|i| r.read(i).is_err()));
+}

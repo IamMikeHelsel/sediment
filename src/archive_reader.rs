@@ -176,6 +176,9 @@ mod zip_method {
     pub const BZIP2: u16 = 12;
     pub const LZMA: u16 = 14;
     pub const XZ: u16 = 95;
+    /// Apple LZFSE: method 99 without the encryption flag or a WinZip AES
+    /// (0x9901) record; the payload is an LZFSE frame (`bvx` blocks).
+    pub const LZFSE: u16 = 99;
 }
 
 /// Largest LZMA/xz dictionary accepted inside a ZIP entry.
@@ -258,6 +261,9 @@ fn decode_zip_payload(method: u16, raw: &[u8], size: usize) -> Result<Vec<u8>, R
                 .0
         }
         zip_method::XZ => decode_xz(raw, MAX_ZIP_DICTIONARY, size).map_err(|_| ReaderError::Invalid)?,
+        zip_method::LZFSE if crate::lzfse::is_lzfse(raw) => {
+            crate::lzfse::decode_lzfse(raw, size).map_err(|_| ReaderError::Invalid)?
+        }
         _ => return Err(ReaderError::Unsupported),
     };
     if out.len() != size {

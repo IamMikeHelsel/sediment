@@ -371,6 +371,11 @@ fn parse_central_record(cd: &[u8], at: usize) -> Result<Central<'_>, Reader2Erro
 fn classify_encryption(flags: u16, method: u16, aes: Option<&[u8]>) -> Result<(Encryption, Compression), Reader2Error> {
     if method == METHOD_AES {
         if flags & FLAG_ENCRYPTED == 0 {
+            // Without the encryption flag and the 0x9901 record, method 99
+            // is the LZFSE method (decoded by `archive_reader`).
+            if aes.is_none() {
+                return Ok((Encryption::None, Compression::Other(METHOD_AES)));
+            }
             return Err(Reader2Error::Invalid);
         }
         let info = parse_aes(aes.ok_or(Reader2Error::Invalid)?)?;
