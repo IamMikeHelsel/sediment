@@ -159,3 +159,4 @@ pub mod ext4_extents;
 pub mod pe_sections;
 pub mod lzip_container;
 pub mod cp437_codec;
+pub mod reader_qcow2;
