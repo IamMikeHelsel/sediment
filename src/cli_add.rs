@@ -303,3 +303,87 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Zip compression method from 7-Zip style `-mm=NAME` switches (names per
+/// [`crate::zip_create::ZipMethod::from_name`]). The 7z-style `-m0=` coder
+/// chain is not a zip switch and is rejected.
+/// `-mmt[=N]` (thread count) is accepted and ignored. Anything else is an
+/// error message for exit code 7. Default: Deflate.
+pub fn zip_method_from_switches(switches: &[OsString]) -> Result<crate::zip_create::ZipMethod, String> {
+    use crate::zip_create::ZipMethod;
+    let mut method = ZipMethod::Deflate;
+    for sw in switches {
+        let s = sw.to_string_lossy();
+        let lower = s.to_ascii_lowercase();
+        if lower.starts_with("-mmt") {
+            continue;
+        }
+        let value = lower.strip_prefix("-mm=").map(|_| &s[4..]);
+        match value {
+            Some(v) => match ZipMethod::from_name(v) {
+                Some(m) => method = m,
+                None => return Err(format!("unsupported zip method: {v} (use Copy, Deflate, Deflate64, BZip2, LZMA or XZ)")),
+            },
+            None => return Err(format!("unsupported switch for zip archives: {s}")),
+        }
+    }
+    Ok(method)
+}
+
+/// Tar header format from 7-Zip style `-mf=ustar|gnu|pax|posix` switches.
+/// `None` keeps the default layout (ustar plus pax headers only where ustar
+/// cannot hold a value). `-mmt[=N]` is accepted and ignored.
+pub fn tar_format_from_switches(switches: &[OsString]) -> Result<Option<crate::tar_create::TarFormat>, String> {
+    use crate::tar_create::TarFormat;
+    let mut format = None;
+    for sw in switches {
+        let s = sw.to_string_lossy();
+        let lower = s.to_ascii_lowercase();
+        if lower.starts_with("-mmt") {
+            continue;
+        }
+        match lower.strip_prefix("-mf=") {
+            Some(v) => match TarFormat::from_name(v) {
+                Some(f) => format = Some(f),
+                None => return Err(format!("unsupported tar format: {} (use ustar, gnu, pax or posix)", &s[4..])),
+            },
+            None => return Err(format!("unsupported switch for tar archives: {s}")),
+        }
+    }
+    Ok(format)
+}
+
+#[cfg(test)]
+mod method_switch_tests {
+    use super::*;
+    use crate::tar_create::TarFormat;
+    use crate::zip_create::ZipMethod;
+
+    fn os(v: &[&str]) -> Vec<OsString> {
+        v.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn zip_methods() {
+        assert_eq!(zip_method_from_switches(&[]), Ok(ZipMethod::Deflate));
+        assert_eq!(zip_method_from_switches(&os(&["-mm=BZip2"])), Ok(ZipMethod::Bzip2));
+        assert_eq!(zip_method_from_switches(&os(&["-mm=lzma", "-mmt=4"])), Ok(ZipMethod::Lzma));
+        assert_eq!(zip_method_from_switches(&os(&["-mm=Deflate64"])), Ok(ZipMethod::Deflate64));
+        assert!(zip_method_from_switches(&os(&["-m0=lzma"])).is_err());
+        assert_eq!(zip_method_from_switches(&os(&["-mm=XZ"])), Ok(ZipMethod::Xz));
+        assert_eq!(zip_method_from_switches(&os(&["-mm=Copy"])), Ok(ZipMethod::Copy));
+        assert!(zip_method_from_switches(&os(&["-mm=PPMd"])).is_err());
+        assert!(zip_method_from_switches(&os(&["-mf=pax"])).is_err());
+    }
+
+    #[test]
+    fn tar_formats() {
+        assert_eq!(tar_format_from_switches(&[]), Ok(None));
+        assert_eq!(tar_format_from_switches(&os(&["-mf=PAX"])), Ok(Some(TarFormat::Pax)));
+        assert_eq!(tar_format_from_switches(&os(&["-mf=posix"])), Ok(Some(TarFormat::Pax)));
+        assert_eq!(tar_format_from_switches(&os(&["-mf=gnu"])), Ok(Some(TarFormat::Gnu)));
+        assert_eq!(tar_format_from_switches(&os(&["-mf=ustar"])), Ok(Some(TarFormat::Ustar)));
+        assert!(tar_format_from_switches(&os(&["-mf=v7"])).is_err());
+        assert!(tar_format_from_switches(&os(&["-mm=LZMA"])).is_err());
+    }
+}

@@ -68,15 +68,15 @@ fn params(level: u8) -> Params {
     Params { max_chain, nice, lazy }
 }
 
-struct BitSink {
-    out: Vec<u8>,
-    acc: u64,
-    nbits: u32,
-    max_output: usize,
+pub(crate) struct BitSink {
+    pub(crate) out: Vec<u8>,
+    pub(crate) acc: u64,
+    pub(crate) nbits: u32,
+    pub(crate) max_output: usize,
 }
 
 impl BitSink {
-    fn put(&mut self, value: u32, width: u32) -> Result<(), CompressError> {
+    pub(crate) fn put(&mut self, value: u32, width: u32) -> Result<(), CompressError> {
         if width == 0 {
             return Ok(());
         }
@@ -101,7 +101,7 @@ impl BitSink {
         Ok(())
     }
 
-    fn align(&mut self) -> Result<(), CompressError> {
+    pub(crate) fn align(&mut self) -> Result<(), CompressError> {
         if self.nbits > 0 {
             self.push_byte(self.acc as u8)?;
             self.acc = 0;
@@ -110,7 +110,7 @@ impl BitSink {
         Ok(())
     }
 
-    fn put_bytes(&mut self, bytes: &[u8]) -> Result<(), CompressError> {
+    pub(crate) fn put_bytes(&mut self, bytes: &[u8]) -> Result<(), CompressError> {
         debug_assert_eq!(self.nbits, 0);
         let end = self.out.len().checked_add(bytes.len()).ok_or(CompressError::LimitExceeded)?;
         if end > self.max_output {
@@ -302,9 +302,9 @@ fn find_match(input: &[u8], pos: usize, head: &[u32], prev: &[u32], p: &Params) 
     if best_len >= MIN_MATCH { (best_len, best_dist) } else { (0, 0) }
 }
 
-const CL_ORDER: [usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+pub(crate) const CL_ORDER: [usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
 
-fn fixed_lit_lengths() -> [u8; 288] {
+pub(crate) fn fixed_lit_lengths() -> [u8; 288] {
     let mut l = [8u8; 288];
     l[144..256].fill(9);
     l[256..280].fill(7);
@@ -453,7 +453,7 @@ fn write_block(
     Ok(())
 }
 
-fn ensure_two(freq: &mut [u32]) {
+pub(crate) fn ensure_two(freq: &mut [u32]) {
     let used = freq.iter().filter(|&&f| f > 0).count();
     if used >= 2 {
         return;
@@ -470,7 +470,7 @@ fn ensure_two(freq: &mut [u32]) {
     }
 }
 
-fn codes_for(lengths: &[u8], max_bits: u8) -> Result<Vec<u16>, CompressError> {
+pub(crate) fn codes_for(lengths: &[u8], max_bits: u8) -> Result<Vec<u16>, CompressError> {
     let codes = canonical_codes(lengths, max_bits).map_err(|e| match e {
         crate::huffman::HuffmanError::Allocation => CompressError::Allocation,
         // Lengths are produced internally and are always valid.
@@ -479,7 +479,7 @@ fn codes_for(lengths: &[u8], max_bits: u8) -> Result<Vec<u16>, CompressError> {
     Ok(codes.into_iter().map(|c| c.unwrap_or(0)).collect())
 }
 
-fn put_code(sink: &mut BitSink, code: u16, len: u8) -> Result<(), CompressError> {
+pub(crate) fn put_code(sink: &mut BitSink, code: u16, len: u8) -> Result<(), CompressError> {
     // Huffman codes are packed MSB-first; reverse into the LSB-first stream.
     let mut rev = 0u32;
     for i in 0..len {
@@ -490,7 +490,7 @@ fn put_code(sink: &mut BitSink, code: u16, len: u8) -> Result<(), CompressError>
 
 /// Build length-limited Huffman code lengths. Symbols with zero frequency get
 /// length 0. Requires at least two nonzero frequencies.
-fn huffman_lengths(freq: &[u32], max_bits: u8) -> Result<Vec<u8>, CompressError> {
+pub(crate) fn huffman_lengths(freq: &[u32], max_bits: u8) -> Result<Vec<u8>, CompressError> {
     let mut f: Vec<u32> = freq.to_vec();
     loop {
         let lens = huffman_unlimited(&f)?;
@@ -569,7 +569,7 @@ fn huffman_unlimited(freq: &[u32]) -> Result<Vec<u8>, CompressError> {
 }
 
 /// Run-length encode code lengths with symbols 16/17/18. Returns (symbol, extra).
-fn rle_lengths(lens: &[u8]) -> Vec<(u8, u8)> {
+pub(crate) fn rle_lengths(lens: &[u8]) -> Vec<(u8, u8)> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < lens.len() {
