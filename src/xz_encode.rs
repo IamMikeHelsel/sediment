@@ -99,6 +99,14 @@ fn reserve(out: &mut Vec<u8>, extra: usize) -> Result<(), XzEncodeError> {
 
 /// Compress `input` into a complete single-stream `.xz` file.
 pub fn encode_xz(input: &[u8], opts: &XzOptions) -> Result<Vec<u8>, XzEncodeError> {
+    encode_xz_mt(input, opts, 1)
+}
+
+/// [`encode_xz`] with the blocks' LZMA2 data encoded on up to `threads`
+/// workers ([`crate::mt_pool::map_ordered`]). Blocks are independent, so the
+/// output is byte-identical for every thread count; set
+/// [`XzOptions::block_size`] to get more than one block.
+pub fn encode_xz_mt(input: &[u8], opts: &XzOptions, threads: usize) -> Result<Vec<u8>, XzEncodeError> {
     opts.lzma.validate()?;
     if opts.lzma.lc + opts.lzma.lp > 4 {
         return Err(XzEncodeError::InvalidOptions);
@@ -118,8 +126,9 @@ pub fn encode_xz(input: &[u8], opts: &XzOptions) -> Result<Vec<u8>, XzEncodeErro
 
     // (unpadded size, uncompressed size) per block.
     let mut records: Vec<(u64, u64)> = Vec::new();
-    for block in input.chunks(block_size) {
-        let (lz, dict_byte) = encode_lzma2(block, &opts.lzma)?;
+    let blocks: Vec<&[u8]> = input.chunks(block_size).collect();
+    let encoded = crate::mt_pool::map_ordered(&blocks, threads, Lzma2EncodeError::Allocation, |b| encode_lzma2(b, &opts.lzma))?;
+    for (block, (lz, dict_byte)) in blocks.iter().copied().zip(encoded) {
         let mut header = Vec::new();
         reserve(&mut header, 32)?;
         header.push(0); // size byte, patched below

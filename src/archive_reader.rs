@@ -73,6 +73,12 @@ pub enum ArchiveFormat {
     Zstd,
     /// Windows Imaging (`.wim`); see `archive_open_ext`.
     Wim,
+    /// LZMA-alone single stream (`.lzma`); see `lzma_alone`.
+    Lzma,
+    /// LZMA SDK `.lzma86` single stream (x86 BCJ flag + LZMA); see `lzma_alone`.
+    Lzma86,
+    /// Apple UDIF disk image (`.dmg`); see `dmg_read`.
+    Dmg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,7 +180,15 @@ mod zip_method {
     pub const BZIP2: u16 = 12;
     pub const LZMA: u16 = 14;
     pub const XZ: u16 = 95;
+    pub const ZSTD: u16 = 93;
+    pub const PPMD: u16 = 98;
+    /// Apple LZFSE: method 99 without the encryption flag or a WinZip AES
+    /// (0x9901) record; the payload is an LZFSE frame (`bvx` blocks).
+    pub const LZFSE: u16 = 99;
 }
+
+/// Largest PPMd var.I model accepted inside a ZIP entry (the format maximum).
+const MAX_ZIP_PPMD_MEMORY: u64 = 256 << 20;
 
 /// Largest LZMA/xz dictionary accepted inside a ZIP entry.
 const MAX_ZIP_DICTIONARY: u64 = 1 << 32;
@@ -182,8 +196,8 @@ const MAX_ZIP_DICTIONARY: u64 = 1 << 32;
 /// ZIP archive reader built on [`ZipArchive2`]: classic and ZIP64
 /// directories, data descriptors, Info-ZIP Unicode Path names, and the
 /// methods Stored, Deflate, Deflate64, BZip2 (12), LZMA (14, APPNOTE
-/// 5.8.8 framing: 2-byte version, 2-byte property size, properties) and
-/// XZ (95). Encrypted entries are listed; reading them returns
+/// 5.8.8 framing: 2-byte version, 2-byte property size, properties),
+/// Zstandard (93), XZ (95) and PPMd var.I rev1 (98). Encrypted entries are listed; reading them returns
 /// `Unsupported`.
 pub struct ZipReader<'a> {
     zip: ZipArchive2<'a>,
@@ -223,8 +237,10 @@ fn dos_to_unix(date: u16, time: u16) -> Option<i64> {
 
 /// Decode a ZIP entry payload with method `method` into exactly `size`
 /// bytes. For LZMA the end marker (general purpose flag bit 1) is optional
-/// because the size is known.
-fn decode_zip_payload(method: u16, raw: &[u8], size: usize) -> Result<Vec<u8>, ReaderError> {
+/// because the size is known. Zstandard (93) payloads are one or more
+/// zstd frames; PPMd (98) payloads carry the APPNOTE 5.10 2-byte parameter
+/// word followed by the PPMd var.I rev1 range-coded stream.
+pub(crate) fn decode_zip_payload(method: u16, raw: &[u8], size: usize) -> Result<Vec<u8>, ReaderError> {
     // One DEFLATE block emits at least one byte unless empty, and costs at
     // least 3 bits of input.
     let max_blocks = size.saturating_add(16).min(raw.len().saturating_mul(8) / 3 + 16);
@@ -256,6 +272,21 @@ fn decode_zip_payload(method: u16, raw: &[u8], size: usize) -> Result<Vec<u8>, R
                 .0
         }
         zip_method::XZ => decode_xz(raw, MAX_ZIP_DICTIONARY, size).map_err(|_| ReaderError::Invalid)?,
+        zip_method::ZSTD => crate::zstd_decode::decode_zstd(raw, size).map_err(|e| match e {
+            crate::zstd_decode::ZstdError::Unsupported => ReaderError::Unsupported,
+            crate::zstd_decode::ZstdError::Allocation => ReaderError::Allocation,
+            crate::zstd_decode::ZstdError::Truncated => ReaderError::Truncated,
+            _ => ReaderError::Invalid,
+        })?,
+        zip_method::PPMD => crate::ppmd8::decode_zip(raw, size, MAX_ZIP_PPMD_MEMORY).map_err(|e| match e {
+            crate::ppmd8::Ppmd8Error::UnsupportedProperties => ReaderError::Unsupported,
+            crate::ppmd8::Ppmd8Error::Allocation => ReaderError::Allocation,
+            crate::ppmd8::Ppmd8Error::UnexpectedEof => ReaderError::Truncated,
+            _ => ReaderError::Invalid,
+        })?,
+        zip_method::LZFSE if crate::lzfse::is_lzfse(raw) => {
+            crate::lzfse::decode_lzfse(raw, size).map_err(|_| ReaderError::Invalid)?
+        }
         _ => return Err(ReaderError::Unsupported),
     };
     if out.len() != size {

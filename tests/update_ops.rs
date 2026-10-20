@@ -590,7 +590,7 @@ fn sorted(mut v: Vec<String>) -> Vec<String> {
 
 /// Packed streams of every folder: (folder index, concatenated pack bytes).
 fn sevenz_packs(bytes: &[u8]) -> Vec<Vec<u8>> {
-    let codecs = sediment_engine::archive_open::SevenZCodecs { max_output: 1 << 30 };
+    let codecs = sediment_engine::archive_open::SevenZCodecs::new(1 << 30);
     let h = parse_archive_header(bytes, &codecs, &SevenZLimits::default()).unwrap();
     let ranges = pack_stream_ranges(bytes.len(), &h.main_streams.pack_info).unwrap();
     let mut out = Vec::new();
@@ -653,7 +653,7 @@ fn sevenz_delete_rename_update_on_7zip_archives() {
 fn sevenz_keeps_times_and_attributes() {
     let z = sevenz_fixture("copy_solid_hc_times.7z");
     let out = delete(&z, &["b.bin"], false);
-    let codecs = sediment_engine::archive_open::SevenZCodecs { max_output: 1 << 30 };
+    let codecs = sediment_engine::archive_open::SevenZCodecs::new(1 << 30);
     let hb = parse_archive_header(&z, &codecs, &SevenZLimits::default()).unwrap();
     let ha = parse_archive_header(&out, &codecs, &SevenZLimits::default()).unwrap();
     for f in &ha.files {

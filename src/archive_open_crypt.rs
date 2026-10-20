@@ -323,7 +323,7 @@ impl<'a> EncSevenZReader<'a> {
         password: Option<&str>,
         status: Rc<CryptStatus>,
     ) -> Result<Self, OpenCryptError> {
-        let codecs = SevenZCodecs { max_output: limits.max_total_size };
+        let codecs = SevenZCodecs::new(limits.max_total_size);
         let decoder = SevenZCryptoDecoder::new(codecs, password, limits.max_total_size).map_err(|e| match e {
             SevenZAesCoderError::Allocation => OpenCryptError::Reader(ReaderError::Allocation),
             _ => OpenCryptError::Reader(ReaderError::LimitExceeded),

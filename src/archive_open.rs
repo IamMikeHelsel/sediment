@@ -54,6 +54,11 @@ const MAX_LINK_TARGET: u64 = 4096;
 /// Largest LZMA/LZMA2 dictionary accepted (the formats cap it at 4 GiB - 1;
 /// the decoder does not preallocate it, so this only rejects nonsense).
 const MAX_DICTIONARY: u64 = 1 << 32;
+/// Default cap on the PPMd model memory a 7z coder may request. Unlike the
+/// LZMA dictionary, the PPMd model is allocated (and zeroed) up front from the
+/// header's property alone, so this must stay modest. 7-Zip's presets top out
+/// at 192 MiB; larger values are refused as [`SevenZReadError::LimitExceeded`].
+pub const DEFAULT_MAX_PPMD_MEMORY: u64 = 256 << 20;
 /// Name used for a single-stream entry when no better name exists.
 const FALLBACK_NAME: &[u8] = b"data";
 
@@ -437,6 +442,7 @@ pub mod sevenz_method {
     pub const DEFLATE: u64 = 0x04_0108;
     pub const DEFLATE64: u64 = 0x04_0109;
     pub const BZIP2: u64 = 0x04_0202;
+    pub const PPMD: u64 = 0x03_0401;
 }
 
 fn method_value(id: &[u8]) -> Option<u64> {
@@ -447,12 +453,22 @@ fn method_value(id: &[u8]) -> Option<u64> {
 }
 
 /// [`FolderDecoder`] for the 7z methods Sediment can decode: Copy, LZMA,
-/// LZMA2, Deflate, Deflate64, BZip2, Delta, the BCJ family (x86, PowerPC,
+/// LZMA2, Deflate, Deflate64, BZip2, PPMd (var.H), Delta, the BCJ family (x86, PowerPC,
 /// IA-64, ARM, ARM-Thumb, ARM64, SPARC, RISC-V) and Swap2/Swap4.
 /// `max_output` caps any single coder output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SevenZCodecs {
     pub max_output: u64,
+    /// Largest PPMd model memory (bytes) accepted from a coder's properties.
+    pub max_ppmd_memory: u64,
+}
+
+impl SevenZCodecs {
+    /// Codecs capped at `max_output` bytes per coder, with the default
+    /// PPMd memory cap ([`DEFAULT_MAX_PPMD_MEMORY`]).
+    pub const fn new(max_output: u64) -> Self {
+        Self { max_output, max_ppmd_memory: DEFAULT_MAX_PPMD_MEMORY }
+    }
 }
 
 impl FolderDecoder for SevenZCodecs {
@@ -494,6 +510,14 @@ impl FolderDecoder for SevenZCodecs {
                 inflate64_raw_prefix(input, size, max_blocks).map_err(|_| E::DecoderFailed)?.0
             }
             sevenz_method::BZIP2 => decode_bzip2(input, size).map_err(|_| E::DecoderFailed)?,
+            sevenz_method::PPMD => {
+                let p = crate::ppmd7::parse_properties(props).map_err(|_| E::DecoderFailed)?;
+                crate::ppmd7::decode(p, input, size, self.max_ppmd_memory).map_err(|e| match e {
+                    crate::ppmd7::Ppmd7Error::LimitExceeded => E::LimitExceeded,
+                    crate::ppmd7::Ppmd7Error::Allocation => E::Allocation,
+                    _ => E::DecoderFailed,
+                })?
+            }
             sevenz_method::DELTA => {
                 let d = parse_delta_properties(props).map_err(|_| E::DecoderFailed)?;
                 delta_decode(d, input, size).map_err(|_| E::DecoderFailed)?
@@ -533,7 +557,7 @@ pub struct SevenZReader<'a> {
 
 impl<'a> SevenZReader<'a> {
     pub fn new(bytes: &'a [u8], limits: ReaderLimits) -> Result<Self, ReaderError> {
-        let codecs = SevenZCodecs { max_output: limits.max_total_size };
+        let codecs = SevenZCodecs::new(limits.max_total_size);
         let sl = SevenZLimits {
             max_files: limits.max_entries,
             max_unpack_bytes: limits.max_total_size,
@@ -674,7 +698,13 @@ pub fn open_named<'a>(
                 (None, None, None)
             };
             let member = header_name.unwrap_or_else(|| stream_member_name(archive_name));
-            let data = decompress(format, bytes, max_stream)?;
+            // Only a tar or cpio payload may exceed one entry; anything else
+            // becomes a single entry, so stop decoding at the entry limit.
+            let container = is_compressed_tar_name(archive_name)
+                || ends_with_ci(&member, b".tar")
+                || ends_with_ci(&member, b".cpio");
+            let cap = if container { max_stream } else { to_usize(limits.max_entry_size.min(limits.max_total_size)) };
+            let data = decompress(format, bytes, cap)?;
             if is_compressed_tar_name(archive_name) || ends_with_ci(&member, b".tar") {
                 return Ok(Box::new(TarReader::new(Cow::Owned(data), limits)?));
             }
@@ -697,7 +727,12 @@ pub fn open_named<'a>(
         // An empty tar archive is only its end-of-archive marker: two or
         // more zero blocks (POSIX ustar; `tar cf x.tar -T /dev/null`).
         Detected::Unknown if is_empty_tar(bytes) => Ok(Box::new(TarReader::new(Cow::Borrowed(bytes), limits)?)),
-        Detected::LzmaAlone | Detected::Unknown => crate::legacy_open::open_legacy(bytes, archive_name, limits),
+        d @ (Detected::LzmaAlone | Detected::Unknown) => {
+            match crate::lzma_alone::try_open(bytes, archive_name, d == Detected::LzmaAlone, limits) {
+                Some(r) => r,
+                None => crate::legacy_open::open_legacy(bytes, archive_name, limits),
+            }
+        }
     }
 }
 
@@ -764,7 +799,7 @@ mod tests {
         assert_eq!(method_value(&[0x03, 0x01, 0x01]), Some(sevenz_method::LZMA));
         assert_eq!(method_value(&[]), None);
         assert_eq!(method_value(&[0; 9]), None);
-        let c = SevenZCodecs { max_output: 10 };
+        let c = SevenZCodecs::new(10);
         assert_eq!(c.decode(&[0], &[], b"abc", 3), Ok(b"abc".to_vec()));
         assert_eq!(c.decode(&[0], &[], b"abc", 4), Err(SevenZReadError::SizeMismatch));
         assert_eq!(c.decode(&[0], &[], b"abc", 11), Err(SevenZReadError::LimitExceeded));

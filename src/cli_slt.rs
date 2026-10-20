@@ -160,7 +160,7 @@ pub type SevenZDetails = (Vec<(String, String)>, Vec<SltEntry>);
 /// 7z listing details: archive-level `(key, value)` lines and one
 /// [`SltEntry`] per non-anti item, in the order `SevenZReader` lists them.
 pub fn sevenz_details(bytes: &[u8], limits: ReaderLimits) -> Result<SevenZDetails, ReaderError> {
-    let codecs = SevenZCodecs { max_output: limits.max_total_size };
+    let codecs = SevenZCodecs::new(limits.max_total_size);
     let sl = SevenZLimits { max_files: limits.max_entries, max_unpack_bytes: limits.max_total_size, ..SevenZLimits::default() };
     let archive = SevenZArchive::open(bytes, &codecs, sl)?;
     let streams = &archive.header().main_streams;

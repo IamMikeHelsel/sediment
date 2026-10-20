@@ -15,6 +15,9 @@
 //!   table, a codec name from [`crate::bench::Codec::parse`] selects a row of
 //!   the throughput table, `*` selects everything. Default: everything.
 //!
+//! * `-mmt[=N]`: also run the block-parallel LZMA2 table (1 vs N threads,
+//!   default all cores; see [`lzma2_mt_table`]).
+//!
 //! Output: the LZMA rating table ([`crate::bench::format_lzma_table`])
 //! followed by the codec throughput table
 //! ([`crate::bench::format_codec_table`]). Exit codes: 0 success, 1 a codec
@@ -140,10 +143,69 @@ fn describe(e: BenchError) -> &'static str {
     }
 }
 
+/// Block-parallel LZMA2 table for `-mmt[=N]`: compress `data` with
+/// [`crate::lzma2_mt::encode_lzma2_mt`] on 1 and on `threads` workers, verify
+/// both round trips, and report speed, packed size and speedup.
+pub fn lzma2_mt_table(data: &[u8], dict_bits: u8, threads: usize) -> Result<String, BenchError> {
+    let opts = crate::bench::bench_lzma_options(dict_bits)?;
+    let mut rows = Vec::new();
+    let mut counts = vec![1usize];
+    if threads > 1 {
+        counts.push(threads);
+    }
+    for &t in &counts {
+        let t0 = std::time::Instant::now();
+        let (packed, dict_byte) = crate::lzma2_mt::encode_lzma2_mt(data, &opts, t).map_err(|e| match e {
+            crate::lzma2_encode::Lzma2EncodeError::Allocation => BenchError::Allocation,
+            _ => BenchError::Codec,
+        })?;
+        let elapsed = t0.elapsed();
+        let dict = crate::lzma2_decode::dictionary_size_from_byte(dict_byte).map_err(|_| BenchError::Codec)?;
+        let (out, _) = crate::lzma2_decode::decode_lzma2(&packed, dict, 1u64 << MAX_DICT_BITS, data.len())
+            .map_err(|_| BenchError::Codec)?;
+        if out != data {
+            return Err(BenchError::Mismatch);
+        }
+        rows.push((t, elapsed, packed.len()));
+    }
+    let base = rows.first().map(|r| r.1.as_secs_f64().max(1e-9)).unwrap_or(1.0);
+    let mut s = format!(
+        "LZMA2 block-parallel (-mmt): dictionary 2^{dict_bits}, {} bytes, block {} bytes at {threads} threads\n\n",
+        data.len(),
+        crate::lzma2_mt::lzma2_block_size(opts.dictionary_size, data.len(), threads)
+    );
+    s.push_str("Threads   Compress MB/s   Packed bytes   Speedup\n");
+    for (t, e, p) in rows {
+        s.push_str(&format!(
+            "{t:>7}   {:>13.2}   {p:>12}   {:>7.2}\n",
+            crate::bench::speed_mb(data.len() as u64, e),
+            base / e.as_secs_f64().max(1e-9)
+        ));
+    }
+    s.push('\n');
+    Ok(s)
+}
+
 /// Run `sediment b` and return its exit code. Results are written to stdout
-/// as each table completes.
+/// as each table completes. `-mmt[=N]` adds the block-parallel LZMA2 table
+/// ([`lzma2_mt_table`]; N defaults to all cores).
 pub fn run_bench(args: &[OsString]) -> i32 {
     let mut err = io::stderr().lock();
+    let mut mt: Option<usize> = None;
+    let mut rest: Vec<OsString> = Vec::new();
+    for a in args {
+        match a.to_str().and_then(|s| s.strip_prefix("-mmt")) {
+            Some(v) => match crate::mt_pool::parse_mmt(v) {
+                Some(n) => mt = Some(crate::mt_pool::resolve_threads(n)),
+                None => {
+                    let _ = writeln!(err, "sediment: usage: sediment b [ITERATIONS] [-md<DICT>] [-ds<SIZE>] [-mm=<CODEC|lzma|*>]... [-mmt[=N]]");
+                    return 2;
+                }
+            },
+            None => rest.push(a.clone()),
+        }
+    }
+    let args = &rest[..];
     let a = match parse_bench_args(args) {
         Ok(a) => a,
         Err(_) => {
@@ -175,6 +237,19 @@ pub fn run_bench(args: &[OsString]) -> i32 {
         }
         if !passes.is_empty() && !emit(&(format_lzma_table(a.dict_bits, &passes) + "\n")) {
             return 2;
+        }
+    }
+    if let Some(t) = mt {
+        match lzma2_mt_table(&data, a.dict_bits, t) {
+            Ok(table) => {
+                if !emit(&table) {
+                    return 2;
+                }
+            }
+            Err(e) => {
+                let _ = writeln!(err, "sediment: LZMA2 MT: {}", describe(e));
+                code = 1;
+            }
         }
     }
     if !a.codecs.is_empty() {

@@ -85,11 +85,21 @@ pub struct CabLimits {
     /// Largest decompressed folder (bounds memory per extraction).
     pub max_folder_size: u64,
     pub verify_checksums: bool,
+    /// Total bytes [`CabArchive::extract_all`] may return across all files
+    /// (same default as `ReaderLimits::max_total_size`).
+    pub max_total_size: u64,
 }
 
 impl Default for CabLimits {
     fn default() -> Self {
-        CabLimits { max_files: 65535, max_folders: 65535, max_name_len: 1024, max_folder_size: 1 << 31, verify_checksums: true }
+        CabLimits {
+            max_files: 65535,
+            max_folders: 65535,
+            max_name_len: 1024,
+            max_folder_size: 1 << 31,
+            verify_checksums: true,
+            max_total_size: 4 << 30,
+        }
     }
 }
 
@@ -516,16 +526,59 @@ impl<'a> CabArchive<'a> {
         Ok(data[r].to_vec())
     }
 
+    /// Folders whose CFDATA chain overlaps the chain of a folder at a lower
+    /// (offset, index): honest cabinets never share data between folders, so
+    /// these are only used to multiply output. Each non-overlapping chain is
+    /// walked once, bounding the work by the archive size.
+    fn overlapping_folders(&self) -> Vec<bool> {
+        let mut order: Vec<usize> = (0..self.folders.len()).filter(|&i| self.folders[i].num_blocks > 0).collect();
+        order.sort_by_key(|&i| (self.folders[i].data_offset, i));
+        let mut bad = vec![false; self.folders.len()];
+        let mut end = 0usize;
+        for i in order {
+            let start = self.folders[i].data_offset as usize;
+            if start < end {
+                bad[i] = true;
+                continue;
+            }
+            // an unreadable chain runs off the end of the archive
+            end = match self.data_blocks(i) {
+                Ok(blocks) => blocks.last().map_or(start, |b| b.data.end),
+                Err(_) => self.bytes.len(),
+            };
+        }
+        bad
+    }
+
     /// Extract every file, decompressing each folder once. The result has one
-    /// entry per file, in archive order.
+    /// entry per file, in archive order. Files past
+    /// [`CabLimits::max_total_size`] bytes of output return
+    /// [`CabError::LimitExceeded`]; files in a folder whose CFDATA overlaps
+    /// another folder's return [`CabError::InvalidFolder`]. A decompressed
+    /// folder is dropped after its last file.
     pub fn extract_all(&self) -> Vec<Result<Vec<u8>, CabError>> {
+        let overlapping = self.overlapping_folders();
+        let mut last_use = vec![usize::MAX; self.folders.len()];
+        for i in 0..self.files.len() {
+            if let Ok(f) = self.folder_index(i) {
+                last_use[f] = i;
+            }
+        }
         let mut cache: Vec<Option<Result<Vec<u8>, CabError>>> = vec![None; self.folders.len()];
+        let mut remaining = self.limits.max_total_size;
         let mut out = Vec::with_capacity(self.files.len());
         for i in 0..self.files.len() {
             let r = (|| {
                 let folder = self.folder_index(i)?;
-                if self.files[i].size == 0 {
+                let size = u64::from(self.files[i].size);
+                if size == 0 {
                     return Ok(Vec::new());
+                }
+                if overlapping[folder] {
+                    return Err(CabError::InvalidFolder);
+                }
+                if size > remaining {
+                    return Err(CabError::LimitExceeded);
                 }
                 if cache[folder].is_none() {
                     cache[folder] = Some(self.folder_data(folder));
@@ -533,12 +586,18 @@ impl<'a> CabArchive<'a> {
                 match cache[folder].as_ref() {
                     Some(Ok(d)) => {
                         let r = self.file_range(i, d.len())?;
+                        remaining -= size;
                         Ok(d[r].to_vec())
                     }
                     Some(Err(e)) => Err(*e),
                     None => Err(CabError::DataError),
                 }
             })();
+            if let Ok(f) = self.folder_index(i)
+                && last_use[f] == i
+            {
+                cache[f] = None;
+            }
             out.push(r);
         }
         out

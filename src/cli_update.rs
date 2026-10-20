@@ -20,6 +20,12 @@
 //! to the archive, the link target is replaced). When nothing changes the
 //! archive is not rewritten.
 //!
+//! Tail switches ([`run_with_tail`]): `-w[{dir}]` writes the temporary
+//! archive in `dir` (empty: the system temp directory) and moves it into
+//! place, `-stl` sets the archive's mtime to its newest entry's, `-bt`
+//! prints the elapsed time, `-ad`/`-bd`/`-ssw` are accepted. A malformed
+//! tail switch is a usage error.
+//!
 //! Exit codes: 0 success, 1 fatal error (archive unchanged), 2 usage error,
 //! 3 archive written but some inputs were skipped (warnings on stderr).
 
@@ -38,6 +44,98 @@ const EXIT_USAGE: i32 = 2;
 const EXIT_SKIPPED: i32 = 3;
 /// Largest archive file read into memory.
 const MAX_ARCHIVE: u64 = 1 << 30;
+
+thread_local! {
+    /// `-w` directory for [`replace_atomically`]'s temporary file.
+    static WORK_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Switches handled around `u`/`d`/`rn` by [`run_with_tail`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EditTail {
+    pub work_dir: Option<PathBuf>,
+    pub stl: bool,
+    pub timing: bool,
+}
+
+/// Remove the tail switches (`-w`, `-stl`, `-bt`, `-ad`, `-bd`, `-ssw`)
+/// from `args`; the rest goes to the command's own parser.
+pub fn take_edit_tail(args: &[OsString]) -> Result<(EditTail, Vec<OsString>), String> {
+    let mut tail = EditTail::default();
+    let mut rest = Vec::new();
+    let mut switches = true;
+    for a in args {
+        let b = a.as_encoded_bytes();
+        if switches && b == b"--" {
+            switches = false;
+        }
+        if !switches || b.len() < 2 || b[0] != b'-' {
+            rest.push(a.clone());
+            continue;
+        }
+        let body = &b[1..];
+        if body[0].eq_ignore_ascii_case(&b'w') {
+            let dir = std::path::Path::new(a).to_string_lossy().into_owned();
+            let dir = &dir[2..];
+            tail.work_dir = Some(if dir.is_empty() { std::env::temp_dir() } else { PathBuf::from(dir) });
+        } else if body.eq_ignore_ascii_case(b"stl") {
+            tail.stl = true;
+        } else if body.eq_ignore_ascii_case(b"bt") {
+            tail.timing = true;
+        } else if body.eq_ignore_ascii_case(b"ad") || body.eq_ignore_ascii_case(b"bd") || body.eq_ignore_ascii_case(b"ssw") {
+        } else if [&b"stl"[..], b"bt", b"ad", b"bd", b"ssw"].iter().any(|p| body.len() > p.len() && body[..p.len()].eq_ignore_ascii_case(p)) {
+            return Err(format!("unsupported switch: {}", a.to_string_lossy()));
+        } else {
+            rest.push(a.clone());
+        }
+    }
+    Ok((tail, rest))
+}
+
+/// The archive operand of `u`/`d`/`rn` arguments (first positional).
+fn archive_operand(args: &[OsString]) -> Option<PathBuf> {
+    let mut switches = true;
+    for a in args {
+        let b = a.as_encoded_bytes();
+        if switches && b == b"--" {
+            switches = false;
+            continue;
+        }
+        if switches && b.len() > 1 && b[0] == b'-' {
+            continue;
+        }
+        return Some(PathBuf::from(a));
+    }
+    None
+}
+
+/// Run `u`/`d`/`rn` (`run`) with the tail switches of [`take_edit_tail`].
+pub fn run_with_tail(args: &[OsString], run: fn(&[OsString]) -> i32) -> i32 {
+    let started = std::time::Instant::now();
+    let (tail, rest) = match take_edit_tail(args) {
+        Ok(v) => v,
+        Err(m) => return usage(&m, "see sediment u/d/rn"),
+    };
+    if let Some(d) = &tail.work_dir
+        && !d.is_dir()
+    {
+        return fail(&format!("working directory not found: {}", d.display()));
+    }
+    WORK_DIR.with(|w| *w.borrow_mut() = tail.work_dir.clone());
+    let mut code = run(&rest);
+    WORK_DIR.with(|w| *w.borrow_mut() = None);
+    if tail.stl
+        && (code == 0 || code == EXIT_SKIPPED)
+        && let Some(a) = archive_operand(&rest)
+        && let Err(m) = crate::cli_run::apply_stl(&a, None)
+    {
+        code = fail(&m);
+    }
+    if tail.timing {
+        let _ = write!(std::io::stdout().lock(), "{}", crate::cli_run::timing_report(started.elapsed()));
+    }
+    code
+}
 
 /// Human-readable message for an update error.
 pub fn update_error_message(e: UpdateError) -> &'static str {
@@ -132,7 +230,10 @@ pub fn replace_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let perms = std::fs::metadata(&target).ok().map(|m| m.permissions());
     let mut tmp_name = target.file_name().map(|n| n.to_os_string()).unwrap_or_default();
     tmp_name.push(format!(".sediment-tmp-{}", std::process::id()));
-    let tmp = target.with_file_name(tmp_name);
+    let tmp = match WORK_DIR.with(|w| w.borrow().clone()) {
+        Some(d) => d.join(&tmp_name),
+        None => target.with_file_name(&tmp_name),
+    };
     let res = (|| -> std::io::Result<()> {
         let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         f.write_all(bytes)?;
@@ -141,7 +242,7 @@ pub fn replace_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
         }
         f.sync_all()?;
         drop(f);
-        std::fs::rename(&tmp, &target)
+        crate::cli_run::move_into_place(&tmp, &target)
     })();
     if let Err(e) = res {
         let _ = std::fs::remove_file(&tmp);

@@ -14,6 +14,8 @@
 //! [`SevenZLimits`] before anything is allocated, and all arithmetic is
 //! checked. Malformed input returns `Err`, never panics.
 
+use std::borrow::Cow;
+
 use crate::crc32::crc32;
 
 /// The six signature bytes `'7' 'z' BC AF 27 1C`.
@@ -977,6 +979,23 @@ fn folder_first_pack(info: &StreamsInfo, folder_index: usize) -> Result<usize> {
     Ok(first)
 }
 
+/// One coder input stream: a packed stream, or the decoded output of the
+/// coder bound to it.
+fn coder_input<'p>(
+    folder: &Folder,
+    in_index: usize,
+    packs: &[&'p [u8]],
+    decoder: &dyn FolderDecoder,
+    limits: &SevenZLimits,
+    depth: usize,
+) -> Result<Cow<'p, [u8]>> {
+    if let Some(k) = folder.packed_streams.iter().position(|&p| p == in_index) {
+        return Ok(Cow::Borrowed(packs.get(k).copied().ok_or(SevenZReadError::Malformed)?));
+    }
+    let bp = folder.bind_pairs.iter().find(|b| b.in_index == in_index).ok_or(SevenZReadError::Malformed)?;
+    Ok(Cow::Owned(decode_out(folder, bp.out_index, packs, decoder, limits, depth + 1)?))
+}
+
 fn decode_out(
     folder: &Folder,
     out_index: usize,
@@ -990,21 +1009,32 @@ fn decode_out(
     }
     let (ci, first_in) = folder.coder_for_out(out_index).ok_or(SevenZReadError::Malformed)?;
     let coder = &folder.coders[ci];
-    if coder.num_in_streams != 1 || coder.num_out_streams != 1 {
+    if coder.num_out_streams != 1 || coder.num_in_streams == 0 {
         return Err(SevenZReadError::Unsupported);
     }
     let size = *folder.unpack_sizes.get(out_index).ok_or(SevenZReadError::Malformed)?;
     if size > limits.max_unpack_bytes {
         return Err(SevenZReadError::LimitExceeded);
     }
-    let owned;
-    let input: &[u8] = if let Some(k) = folder.packed_streams.iter().position(|&p| p == first_in) {
-        packs.get(k).copied().ok_or(SevenZReadError::Malformed)?
-    } else {
-        let bp = folder.bind_pairs.iter().find(|b| b.in_index == first_in).ok_or(SevenZReadError::Malformed)?;
-        owned = decode_out(folder, bp.out_index, packs, decoder, limits, depth + 1)?;
-        &owned
-    };
+    if coder.num_in_streams != 1 {
+        // Multi-input coder graph (BCJ2): resolve every input stream, each
+        // either a packed stream or the output of another coder via a bind pair.
+        if coder.method_id != crate::bcj2::BCJ2_METHOD_ID_BYTES || coder.num_in_streams != 4 {
+            return Err(SevenZReadError::Unsupported);
+        }
+        let mut inputs: Vec<Cow<'_, [u8]>> = Vec::new();
+        inputs.try_reserve_exact(4).map_err(|_| SevenZReadError::Allocation)?;
+        for k in 0..4 {
+            inputs.push(coder_input(folder, first_in + k, packs, decoder, limits, depth)?);
+        }
+        let size = usize::try_from(size).map_err(|_| SevenZReadError::LimitExceeded)?;
+        return crate::bcj2::bcj2_decode(&inputs[0], &inputs[1], &inputs[2], &inputs[3], size).map_err(|e| match e {
+            crate::bcj2::Bcj2Error::Allocation => SevenZReadError::Allocation,
+            _ => SevenZReadError::DecoderFailed,
+        });
+    }
+    let input = coder_input(folder, first_in, packs, decoder, limits, depth)?;
+    let input: &[u8] = &input;
     let out = if coder.method_id == method_id::COPY {
         if input.len() as u64 != size {
             return Err(SevenZReadError::SizeMismatch);

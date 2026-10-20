@@ -371,6 +371,11 @@ fn parse_central_record(cd: &[u8], at: usize) -> Result<Central<'_>, Reader2Erro
 fn classify_encryption(flags: u16, method: u16, aes: Option<&[u8]>) -> Result<(Encryption, Compression), Reader2Error> {
     if method == METHOD_AES {
         if flags & FLAG_ENCRYPTED == 0 {
+            // Without the encryption flag and the 0x9901 record, method 99
+            // is the LZFSE method (decoded by `archive_reader`).
+            if aes.is_none() {
+                return Ok((Encryption::None, Compression::Other(METHOD_AES)));
+            }
             return Err(Reader2Error::Invalid);
         }
         let info = parse_aes(aes.ok_or(Reader2Error::Invalid)?)?;
@@ -656,11 +661,28 @@ impl<'a> ZipArchive2<'a> {
                 }
                 Cow::Owned(out)
             }
+            // Zstandard (93) and PPMd var.I (98) share the decoder used by
+            // `archive_reader::ZipReader`.
+            Compression::Other(m @ (93 | 98)) => {
+                Cow::Owned(crate::archive_reader::decode_zip_payload(m, raw, size).map_err(reader_to_reader2)?)
+            }
             Compression::Deflate64 | Compression::Other(_) => return Err(Reader2Error::Unsupported),
         };
         if crc32(&data) != e.crc32 {
             return Err(Reader2Error::CrcMismatch);
         }
         Ok(data)
+    }
+}
+
+fn reader_to_reader2(e: crate::archive_reader::ReaderError) -> Reader2Error {
+    use crate::archive_reader::ReaderError as E;
+    match e {
+        E::Truncated => Reader2Error::Truncated,
+        E::Unsupported => Reader2Error::Unsupported,
+        E::LimitExceeded => Reader2Error::LimitExceeded,
+        E::Allocation => Reader2Error::Allocation,
+        E::CrcMismatch => Reader2Error::CrcMismatch,
+        _ => Reader2Error::Invalid,
     }
 }
