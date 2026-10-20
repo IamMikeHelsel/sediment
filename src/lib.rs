@@ -152,3 +152,6 @@ pub mod zipcrypto;
 pub mod zlib_encode;
 pub mod zlib_wrapper;
 pub mod zstd_decode;
+pub mod uefi_fv;
+pub mod vdi_header;
+pub mod macho_commands;
