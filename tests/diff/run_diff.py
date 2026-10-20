@@ -565,9 +565,27 @@ def unescape_name(s):
     return out.decode("utf-8", "surrogateescape")
 
 
+RULE_7Z = "------------------- ----- ------------ ------------  ------------------------"
+
+
+def parse_7z_table(lines):
+    """Rows between the two rules of the 7-Zip `l` table (Size at 26..38, Name from 53)."""
+    rules = [i for i, ln in enumerate(lines) if ln == RULE_7Z]
+    if len(rules) < 2:
+        return None
+    out = []
+    for ln in lines[rules[0] + 1:rules[1]]:
+        if len(ln) < 54:
+            return None
+        out.append({"Path": ln[53:], "Size": ln[26:38].strip(), "CRC": "", "_table": True})
+    return out
+
+
 def parse_sediment_table(text):
     lines = text.splitlines()
-    if not lines or lines[0] != "SIZE\tCRC32\tNAME":
+    if lines and lines[0] != "SIZE\tCRC32\tNAME":
+        return parse_7z_table(lines)
+    if not lines:
         return None
     out = []
     for ln in lines[1:]:

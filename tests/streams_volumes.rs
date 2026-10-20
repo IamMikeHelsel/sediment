@@ -128,7 +128,7 @@ fn si_tar_gz_is_detected_as_tar() {
     let o = run_in(&["l", "-si"], &whole, &[]);
     ok(&o);
     let s = text(&o.stdout);
-    assert!(s.contains("\thello.txt\n") && s.contains("\tpayload.bin\n"), "{s}");
+    assert!(s.contains("  hello.txt\n") && s.contains("  payload.bin\n"), "{s}");
     let o = run_in(&["t", "-si"], &whole, &[]);
     ok(&o);
     assert_eq!(text(&o.stdout), "OK\t2\t16015\n");
@@ -262,7 +262,7 @@ fn split_tar_gz_reads_transparently() {
     let first = fx("pair.tar.gz.001");
     let o = run(&["l".as_ref(), first.as_os_str()]);
     ok(&o);
-    assert!(text(&o.stdout).contains("\tpayload.bin\n"));
+    assert!(text(&o.stdout).contains("  payload.bin\n"));
     let o = run(&["t".as_ref(), first.as_os_str()]);
     ok(&o);
     assert_eq!(text(&o.stdout), "OK\t2\t16015\n");
@@ -418,9 +418,9 @@ fn si_named_member_in_tar_file() {
     let arc = t.join("n.tar");
     let o = run_in(&["a".as_ref(), "-sinotes.txt".as_ref(), arc.as_os_str()], b"note body\n", &[]);
     ok(&o);
-    let l = run(&["l".as_ref(), arc.as_os_str()]);
+    let l = run(&["l".as_ref(), "-ba".as_ref(), arc.as_os_str()]);
     ok(&l);
-    assert!(text(&l.stdout).ends_with("10\t--------\tnotes.txt\n"), "{}", text(&l.stdout));
+    assert!(text(&l.stdout).ends_with("           10          512  notes.txt\n"), "{}", text(&l.stdout));
     // Unsafe -si names are rejected by the container writer.
     let o = run_in(&["a".as_ref(), "-si../x".as_ref(), t.join("bad.tar").as_os_str()], b"x", &[]);
     assert_clean_fail(&o, 2); // fatal: 7-Zip exit code 2

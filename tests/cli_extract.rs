@@ -63,9 +63,11 @@ fn legacy_and_new_list_agree() {
     let f = fixture("basic.zip");
     let f = f.to_str().unwrap();
     let legacy = run(&["list", f]);
-    let new = run(&["l", f]);
+    let new = run(&["l", "-ba", f]);
     assert_eq!(legacy.status.code(), Some(0));
-    assert_eq!(legacy.stdout, new.stdout);
+    // `l` now prints 7-Zip's table; it lists the same members in the same order.
+    let names: Vec<String> = stdout(&new).lines().map(|l| l.get(53..).unwrap().to_string()).collect();
+    assert_eq!(names, ["docs", "docs/readme.txt", "hello.txt", "bin/run.sh", "a/b/c/deep.txt", "empty.txt"]);
     assert_eq!(
         stdout(&legacy),
         "SIZE\tCRC32\tNAME\n0\t00000000\tdocs/\n1160\t3e84e9d9\tdocs/readme.txt\n13\tf4247453\thello.txt\n\

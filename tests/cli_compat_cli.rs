@@ -87,13 +87,10 @@ fn code(o: &Output) -> i32 {
     o.status.code().unwrap_or(-1)
 }
 
-/// Names (third column) of `l -ba`, without trailing `/`.
+/// Names (the 7-Zip table's Name column, from byte 53) of `l -ba`.
 fn names(o: &Output) -> Vec<String> {
     assert_eq!(code(o), 0, "{}", text(&o.stderr));
-    text(&o.stdout)
-        .lines()
-        .map(|l| l.splitn(3, '\t').nth(2).unwrap().trim_end_matches('/').to_string())
-        .collect()
+    text(&o.stdout).lines().map(|l| l.get(53..).unwrap().trim_end_matches('/').to_string()).collect()
 }
 
 fn sorted(mut v: Vec<String>) -> Vec<String> {
@@ -106,7 +103,8 @@ fn strs(v: &[&str]) -> Vec<String> {
 }
 
 const LONG: &str = "docs/deep/nested/long_long_long_long_long_long_long_long_long_long_long_long_long_long_long_long_long_long_.txt";
-const CAFE: &str = "docs/caf\\xc3\\xa9.txt";
+/// As listed by `l` (UTF-8, like 7-Zip).
+const CAFE: &str = "docs/café.txt";
 
 // ---------------------------------------------------------------------------
 // Exit codes
@@ -310,18 +308,22 @@ fn stream_routing() {
     let zip = wire("tree.zip");
     let o = run(&argv!["l", &zip, "-bso0"]);
     assert_eq!((code(&o), o.stdout.len(), o.stderr.len()), (0, 0, 0));
-    let o = run(&argv!["l", &zip, "-bso2", "hello.txt"]);
-    assert_eq!(text(&o.stderr), "SIZE\tCRC32\tNAME\n17\t62906a7f\thello.txt\n");
+    let row = "2024-03-05 06:07:08 .....           17           19  hello.txt\n";
+    let o = run(&argv!["l", &zip, "-bso2", "-ba", "hello.txt"]);
+    assert_eq!(text(&o.stderr), row);
     assert!(o.stdout.is_empty());
     let o = run(&argv!["l", "/nonexistent.zip", "-bse1"]);
     assert_eq!((code(&o), text(&o.stdout), o.stderr.len()), (2, "sediment: cannot open file\n".to_string(), 0));
     let o = run(&argv!["l", "/nonexistent.zip", "-bse0"]);
     assert_eq!((code(&o), o.stdout.len(), o.stderr.len()), (2, 0, 0));
     let o = run(&argv!["l", "-ba", &zip, "hello.txt"]);
-    assert_eq!(text(&o.stdout), "17\t62906a7f\thello.txt\n");
-    // Frozen default output for l is unchanged.
+    assert_eq!(text(&o.stdout), row);
+    // Default output for l is 7-Zip's table (header block, rows, totals).
     let o = run(&argv!["l", &zip, "hello.txt"]);
-    assert_eq!(text(&o.stdout), "SIZE\tCRC32\tNAME\n17\t62906a7f\thello.txt\n");
+    let s = text(&o.stdout);
+    assert!(s.starts_with("Listing archive: "), "{s}");
+    assert!(s.contains(&format!("------------------------\n{row}------")), "{s}");
+    assert!(s.ends_with("           17           19  1 files\n"), "{s}");
 }
 
 // ---------------------------------------------------------------------------
@@ -610,12 +612,12 @@ fn add_wildcards_and_filters() {
         (argv!["*.txt"], vec!["empty.txt", "hello.txt"]),
         (argv!["-r", "*.txt"], vec!["data/words.txt", CAFE, "docs/deep/nested/leaf.txt", LONG, "empty.txt", "hello.txt"]),
         (argv!["-r", "leaf.txt"], vec!["docs/deep/nested/leaf.txt"]),
-        (argv!["docs", "-xr!*.md", "-x!docs/deep"], vec!["docs", "docs/caf\\xc3\\xa9.txt"]),
+        (argv!["docs", "-xr!*.md", "-x!docs/deep"], vec!["docs", CAFE]),
         (argv!["-i!data/*.bin"], vec!["prog.bin", "random.bin"]),
         (argv!["data/*.bin", "-x!random.bin"], vec!["prog.bin"]),
         (argv!["*/*.md"], vec!["docs/readme.md"]),
         (argv!["d*", "-xr!*.txt", "-xr!*.bin", "-x!docs/deep"], vec!["data", "docs", "docs/readme.md"]),
-        (argv![os(format!("@{}", lst.display()))], vec!["hello.txt", "caf\\xc3\\xa9.txt", "prog.bin", "random.bin"]),
+        (argv![os(format!("@{}", lst.display()))], vec!["hello.txt", "café.txt", "prog.bin", "random.bin"]),
         (argv!["-ssc-", "HELLO.*"], vec!["hello.txt"]),
         (
             argv!["*"],
