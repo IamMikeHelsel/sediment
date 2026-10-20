@@ -145,3 +145,7 @@ pub mod zlib_wrapper;
 pub mod zstd_decode;
 pub mod mt_pool;
 pub mod lzma2_mt;
+pub mod base64_codec;
+pub mod slt_format;
+pub mod cramfs_dir;
+pub mod reader_base64;
