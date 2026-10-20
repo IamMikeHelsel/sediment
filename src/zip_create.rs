@@ -12,6 +12,18 @@
 //! with a trailing `/`. Symlinks are skipped (reported in `skipped`), since ZIP
 //! symlink support varies across readers. Output is byte-deterministic.
 //! `zip_write::write_stored` is not reused: it fixes time/date and attributes.
+//!
+//! [`create_zip_with_method`] selects the compression method (7-Zip `-mm=`):
+//! Copy (0), Deflate (8), Deflate64 (9, `deflate64_encode`), BZip2 (12, a
+//! complete bzip2 stream from `bzip2_encode`), LZMA (14) and XZ (95, a
+//! complete .xz stream from `xz_encode`). Per APPNOTE 5.8.8 an LZMA payload
+//! starts with a 4-byte header (LZMA SDK major/minor version, little-endian
+//! properties size 5) followed by the 5 property bytes (lc/lp/pb byte and the
+//! 32-bit dictionary size); the raw LZMA stream always ends with the
+//! end-of-stream marker and general-purpose flag bit 1 is set to say so.
+//! "Version needed to extract" follows APPNOTE 4.4.3.2 (2.0 deflate, 2.1
+//! Deflate64, 4.6 BZip2, 6.3 LZMA/XZ). Entries whose payload would not shrink
+//! are stored, like 7-Zip does.
 
 use crate::crc32::crc32;
 use crate::deflate_compress::{CompressError, deflate_compress};
@@ -60,7 +72,7 @@ pub struct ZipCreated {
     pub bytes: Vec<u8>,
     /// Indices into the input of entries that were not written (symlinks).
     pub skipped: Vec<usize>,
-    /// Methods per written entry, in order (0 stored, 8 deflate).
+    /// Methods per written entry, in order (0 stored, else the `ZipMethod` id).
     pub methods: Vec<u16>,
 }
 
@@ -68,6 +80,108 @@ const LOCAL_SIG: u32 = 0x0403_4b50;
 const CENTRAL_SIG: u32 = 0x0201_4b50;
 const EOCD_SIG: u32 = 0x0605_4b50;
 const VERSION_NEEDED: u16 = 20;
+const FLAG_LZMA_EOS: u16 = 0x0002;
+
+/// Compression method for [`create_zip_with_method`] (7-Zip `-mm=` names).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZipMethod {
+    Copy,
+    Deflate,
+    Deflate64,
+    Bzip2,
+    Lzma,
+    Xz,
+}
+
+impl ZipMethod {
+    /// APPNOTE 4.4.5 method id.
+    pub fn id(self) -> u16 {
+        match self {
+            ZipMethod::Copy => 0,
+            ZipMethod::Deflate => 8,
+            ZipMethod::Deflate64 => 9,
+            ZipMethod::Bzip2 => 12,
+            ZipMethod::Lzma => 14,
+            ZipMethod::Xz => 95,
+        }
+    }
+
+    /// Parse a 7-Zip method name (case-insensitive): Copy, Store, Deflate,
+    /// Deflate64, BZip2, LZMA, XZ.
+    pub fn from_name(name: &str) -> Option<ZipMethod> {
+        Some(match name.to_ascii_lowercase().as_str() {
+            "copy" | "store" => ZipMethod::Copy,
+            "deflate" => ZipMethod::Deflate,
+            "deflate64" => ZipMethod::Deflate64,
+            "bzip2" => ZipMethod::Bzip2,
+            "lzma" => ZipMethod::Lzma,
+            "xz" => ZipMethod::Xz,
+            _ => return None,
+        })
+    }
+
+    /// APPNOTE 4.4.3.2 "version needed to extract" for this method.
+    fn version_needed(self) -> u16 {
+        match self {
+            ZipMethod::Copy | ZipMethod::Deflate => VERSION_NEEDED,
+            ZipMethod::Deflate64 => 21,
+            ZipMethod::Bzip2 => 46,
+            ZipMethod::Lzma | ZipMethod::Xz => 63,
+        }
+    }
+}
+
+/// Compress one payload with `method` at `level` (1..=9). `Ok(None)` means
+/// the result would not be smaller than the input (store it instead).
+fn compress_payload(data: &[u8], method: ZipMethod, level: u8) -> Result<Option<Vec<u8>>, ZipCreateError> {
+    use crate::compress_wrap::{WrapError, bzip2_compress, xz_compress};
+    let cap = data.len() - 1;
+    let wrap = |r: Result<Vec<u8>, WrapError>| match r {
+        Ok(v) => Ok(Some(v)),
+        Err(WrapError::LimitExceeded) => Ok(None),
+        Err(WrapError::Allocation) => Err(ZipCreateError::Allocation),
+        Err(_) => Err(ZipCreateError::InvalidLevel),
+    };
+    let out = match method {
+        ZipMethod::Copy => return Ok(None),
+        ZipMethod::Deflate => match deflate_compress(data, level, cap) {
+            Ok(c) => Some(c),
+            Err(CompressError::LimitExceeded) => None,
+            Err(CompressError::Allocation) => return Err(ZipCreateError::Allocation),
+            Err(CompressError::InvalidLevel) => return Err(ZipCreateError::InvalidLevel),
+        },
+        ZipMethod::Deflate64 => {
+            use crate::deflate64_encode::{Deflate64EncodeError, deflate64_compress};
+            match deflate64_compress(data, level, cap) {
+                Ok(c) => Some(c),
+                Err(Deflate64EncodeError::LimitExceeded) => None,
+                Err(Deflate64EncodeError::Allocation) => return Err(ZipCreateError::Allocation),
+                Err(Deflate64EncodeError::InvalidLevel) => return Err(ZipCreateError::InvalidLevel),
+            }
+        }
+        ZipMethod::Bzip2 => wrap(bzip2_compress(data, level, cap))?,
+        ZipMethod::Xz => wrap(xz_compress(data, level, cap))?,
+        ZipMethod::Lzma => {
+            use crate::lzma_encode::{LzmaEncodeError, LzmaEncoderOptions, effective_dictionary_size, encode_lzma_raw, props_byte};
+            let lz = |e: LzmaEncodeError| match e {
+                LzmaEncodeError::Allocation => ZipCreateError::Allocation,
+                LzmaEncodeError::InputTooLarge => ZipCreateError::Unsupported,
+                LzmaEncodeError::InvalidOptions => ZipCreateError::InvalidLevel,
+            };
+            let opts = LzmaEncoderOptions::preset(level as u32).map_err(lz)?;
+            let dict = effective_dictionary_size(opts.dictionary_size, data.len());
+            let raw = encode_lzma_raw(data, &opts, true).map_err(lz)?;
+            let mut v = Vec::new();
+            v.try_reserve_exact(raw.len() + 9).map_err(|_| ZipCreateError::Allocation)?;
+            // LZMA SDK version 9.20 (informational), properties size 5.
+            v.extend_from_slice(&[9, 20, 5, 0, props_byte(opts.lc, opts.lp, opts.pb)]);
+            v.extend_from_slice(&dict.to_le_bytes());
+            v.extend_from_slice(&raw);
+            Some(v)
+        }
+    };
+    Ok(out.filter(|c| c.len() < data.len()))
+}
 const VERSION_MADE_BY: u16 = (3 << 8) | 30; // Unix, spec 3.0
 const FLAG_UTF8: u16 = 0x0800;
 const S_IFREG: u32 = 0o100000;
@@ -76,6 +190,7 @@ const S_IFDIR: u32 = 0o040000;
 struct Prepared<'a> {
     name: Vec<u8>,
     flags: u16,
+    version_needed: u16,
     method: u16,
     crc: u32,
     csize: u32,
@@ -144,6 +259,17 @@ pub fn create_zip(
     options: ZipCreateOptions,
     limits: ZipCreateLimits,
 ) -> Result<ZipCreated, ZipCreateError> {
+    create_zip_with_method(entries, options, ZipMethod::Deflate, limits)
+}
+
+/// Build a ZIP archive whose file entries use `method` (stored when level is
+/// 0, the entry is empty, or compression does not shrink it).
+pub fn create_zip_with_method(
+    entries: &[ArchiveEntry<'_>],
+    options: ZipCreateOptions,
+    method: ZipMethod,
+    limits: ZipCreateLimits,
+) -> Result<ZipCreated, ZipCreateError> {
     if options.level > 9 {
         return Err(ZipCreateError::InvalidLevel);
     }
@@ -193,17 +319,17 @@ pub fn create_zip(
             return Err(ZipCreateError::Unsupported);
         }
         let crc = crc32(e.data);
-        let (method, payload): (u16, std::borrow::Cow<'_, [u8]>) = if options.level == 0 || e.data.is_empty() {
+        let (method_id, payload): (u16, std::borrow::Cow<'_, [u8]>) = if options.level == 0 || e.data.is_empty() {
             (0, std::borrow::Cow::Borrowed(e.data))
         } else {
-            // Cap at len-1: anything not strictly smaller is stored instead.
-            match deflate_compress(e.data, options.level, e.data.len() - 1) {
-                Ok(c) => (8, std::borrow::Cow::Owned(c)),
-                Err(CompressError::LimitExceeded) => (0, std::borrow::Cow::Borrowed(e.data)),
-                Err(CompressError::Allocation) => return Err(ZipCreateError::Allocation),
-                Err(CompressError::InvalidLevel) => return Err(ZipCreateError::InvalidLevel),
+            // Anything not strictly smaller is stored instead.
+            match compress_payload(e.data, method, options.level)? {
+                Some(c) => (method.id(), std::borrow::Cow::Owned(c)),
+                None => (0, std::borrow::Cow::Borrowed(e.data)),
             }
         };
+        let version_needed = if method_id == 0 { VERSION_NEEDED } else { method.version_needed() };
+        let flags = if method_id == 14 { flags | FLAG_LZMA_EOS } else { flags };
         let (time, date) = dos_time_from_unix(e.mtime);
         let type_bits = if is_dir { S_IFDIR } else { S_IFREG };
         let ext_attr = ((type_bits | (e.mode & 0o7777)) << 16) | if is_dir { 0x10 } else { 0 };
@@ -221,7 +347,8 @@ pub fn create_zip(
             csize: too_big(payload.len())?,
             name,
             flags,
-            method,
+            version_needed,
+            method: method_id,
             crc,
             usize_,
             time,
@@ -258,7 +385,7 @@ pub fn create_zip(
     out.try_reserve_exact(total).map_err(|_| ZipCreateError::Allocation)?;
     for p in &prepared {
         put32(&mut out, LOCAL_SIG);
-        put16(&mut out, VERSION_NEEDED);
+        put16(&mut out, p.version_needed);
         put16(&mut out, p.flags);
         put16(&mut out, p.method);
         put16(&mut out, p.time);
@@ -277,7 +404,7 @@ pub fn create_zip(
     for p in &prepared {
         put32(&mut out, CENTRAL_SIG);
         put16(&mut out, VERSION_MADE_BY);
-        put16(&mut out, VERSION_NEEDED);
+        put16(&mut out, p.version_needed);
         put16(&mut out, p.flags);
         put16(&mut out, p.method);
         put16(&mut out, p.time);
