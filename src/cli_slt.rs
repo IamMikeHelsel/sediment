@@ -228,3 +228,159 @@ pub fn archive_header(display: &str, type_name: &str, physical: u64, extra: &[(S
     s.push_str("\n----------\n");
     s
 }
+
+// ---------------------------------------------------------------------------
+// Default `l` table (7-Zip "Date Time Attr Size Compressed Name" layout)
+// ---------------------------------------------------------------------------
+
+/// One row of the default `l` table.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TableRow {
+    /// FILETIME (100 ns ticks since 1601-01-01 UTC), if known.
+    pub modified: Option<u64>,
+    /// Windows attribute bits (only `R H S D A` are shown).
+    pub attributes: u32,
+    pub size: u64,
+    /// Bytes the member occupies in the archive, when the format says.
+    pub packed: Option<u64>,
+    /// Display name: UTF-8 as is, directory slash dropped (see [`slt_path`]).
+    pub name: String,
+    pub is_dir: bool,
+}
+
+/// Column header line of the table.
+pub const TABLE_HEADER: &str = "   Date      Time    Attr         Size   Compressed  Name\n";
+/// Separator line printed above and below the rows.
+pub const TABLE_RULE: &str = "------------------- ----- ------------ ------------  ------------------------\n";
+
+fn table_date(ft: Option<u64>) -> String {
+    match ft {
+        Some(ft) => {
+            let s = crate::cli_seam::slt_format::format_filetime(ft);
+            s.get(..19).unwrap_or(&s).to_owned()
+        }
+        None => String::new(),
+    }
+}
+
+/// The five-character attribute column: `D R H S A`, `.` when clear.
+pub fn table_attributes(attrib: u32) -> String {
+    [(0x10u32, 'D'), (0x01, 'R'), (0x02, 'H'), (0x04, 'S'), (0x20, 'A')]
+        .iter()
+        .map(|&(bit, c)| if attrib & bit != 0 { c } else { '.' })
+        .collect()
+}
+
+/// One formatted table row (with newline).
+pub fn format_table_row(r: &TableRow) -> String {
+    let packed = r.packed.map(|p| p.to_string()).unwrap_or_default();
+    format!("{:19} {} {:>12} {:>12}  {}\n", table_date(r.modified), table_attributes(r.attributes), r.size, packed, r.name)
+}
+
+/// Totals line: newest date, summed sizes, `N files[, M folders]`.
+pub fn format_table_totals(rows: &[TableRow]) -> String {
+    let newest = rows.iter().filter_map(|r| r.modified).max();
+    let size = rows.iter().fold(0u64, |a, r| a.saturating_add(r.size));
+    let packed = if !rows.is_empty() && rows.iter().all(|r| r.packed.is_none()) {
+        String::new()
+    } else {
+        rows.iter().filter_map(|r| r.packed).fold(0u64, |a, p| a.saturating_add(p)).to_string()
+    };
+    let folders = rows.iter().filter(|r| r.is_dir).count();
+    let files = rows.len() - folders;
+    let mut count = format!("{files} files");
+    if folders > 0 {
+        count.push_str(&format!(", {folders} folders"));
+    }
+    format!("{:19}       {:>12} {:>12}  {count}\n", table_date(newest), size, packed)
+}
+
+/// Header, rule, rows, rule and totals (no archive block).
+pub fn format_table(rows: &[TableRow]) -> String {
+    let mut s = String::from(TABLE_HEADER);
+    s.push_str(TABLE_RULE);
+    for r in rows {
+        s.push_str(&format_table_row(r));
+    }
+    s.push_str(TABLE_RULE);
+    s.push_str(&format_table_totals(rows));
+    s
+}
+
+/// Per-member `(DOS attribute byte, compressed size)` from the zip central
+/// directory, in the order `ZipReader` lists members.
+fn zip_table_details(bytes: &[u8], limits: ReaderLimits) -> Option<Vec<(u32, u64)>> {
+    use crate::zip_reader2::{Reader2Limits, ZipArchive2};
+    let l2 = Reader2Limits {
+        max_entries: limits.max_entries,
+        max_entry_size: limits.max_total_size,
+        max_total_size: limits.max_total_size,
+        max_deflate_blocks: 1 << 20,
+    };
+    let zip = ZipArchive2::open(bytes, l2).ok()?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(zip.len()).ok()?;
+    out.extend(zip.entries().iter().map(|e| (e.external_attributes & 0x37, e.compressed_size)));
+    Some(out)
+}
+
+/// Rows of the default `l` table for members `chosen` of `reader`; `bytes`
+/// is the whole archive (re-read for zip/7z specific columns).
+pub fn table_rows(reader: &dyn ArchiveReader, chosen: &[usize], bytes: &[u8], limits: ReaderLimits) -> Vec<TableRow> {
+    let format = reader.format();
+    let entries = reader.entries();
+    let sevenz = match format {
+        ArchiveFormat::SevenZ => sevenz_details(bytes, limits).ok().map(|(_, e)| e).filter(|e| e.len() == entries.len()),
+        _ => None,
+    };
+    let zip = match format {
+        ArchiveFormat::Zip => zip_table_details(bytes, limits).filter(|z| z.len() == entries.len()),
+        _ => None,
+    };
+    let mut rows = Vec::new();
+    for &i in chosen {
+        let Some(e) = entries.get(i) else { continue };
+        let is_dir = matches!(e.kind, EntryKind::Dir);
+        let mut row = TableRow {
+            modified: e.mtime.and_then(unix_to_filetime),
+            attributes: entry_attributes(e, format).unwrap_or(0) & 0x37,
+            size: listed_size(e),
+            packed: None,
+            name: slt_path(&e.path),
+            is_dir,
+        };
+        match format {
+            ArchiveFormat::SevenZ => {
+                if let Some(d) = sevenz.as_ref().and_then(|s| s.get(i)) {
+                    row.modified = d.modified;
+                    row.attributes = d.attributes.unwrap_or(0) & 0x37;
+                    // Empty files (no stream) show a blank Compressed cell, as 7-Zip does.
+                    row.packed = d.packed_size.filter(|&p| is_dir || p != 0 || d.size != 0);
+                    row.size = d.size;
+                    row.name = d.path.clone();
+                }
+            }
+            ArchiveFormat::Zip => {
+                if let Some(&(attr, packed)) = zip.as_ref().and_then(|z| z.get(i)) {
+                    row.attributes = attr;
+                    row.packed = Some(packed);
+                } else {
+                    row.attributes &= 0x10;
+                }
+            }
+            ArchiveFormat::Tar => {
+                row.attributes &= 0x10;
+                row.packed = Some(match e.kind {
+                    EntryKind::File => e.size.div_ceil(512).saturating_mul(512),
+                    _ => 0,
+                });
+            }
+            _ => {}
+        }
+        if is_dir {
+            row.attributes |= 0x10;
+        }
+        rows.push(row);
+    }
+    rows
+}

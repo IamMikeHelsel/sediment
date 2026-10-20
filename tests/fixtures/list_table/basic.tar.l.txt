@@ -1,0 +1,27 @@
+
+7-Zip (z) 26.04 (arm64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-10-05
+ 64-bit arm_v:8-A locale=en_US.utf8 Threads:20 OPEN_MAX:32768, ASM
+
+Scanning the drive for archives:
+1 file, 30720 bytes (30 KiB)
+
+Listing archive: basic.tar
+
+--
+Path = basic.tar
+Type = tar
+Physical Size = 30720
+Headers Size = 15872
+Code Page = UTF-8
+Characteristics = POSIX PAX path UTF8 MaxUnicode=26412
+
+   Date      Time    Attr         Size   Compressed  Name
+------------------- ----- ------------ ------------  ------------------------
+2024-03-05 06:07:08 D....            0            0  dir
+2024-03-05 06:07:08 .....            7          512  dir/nested.txt
+2023-12-31 23:59:58 .....          750         1024  a.txt
+2020-01-02 03:04:06 .....            0            0  empty
+2024-03-05 06:07:08 .....           11          512  café.txt
+2024-03-05 06:07:08 .....        12345        12800  héllo_日本.txt
+------------------- ----- ------------ ------------  ------------------------
+2024-03-05 06:07:08              13113        14848  5 files, 1 folders

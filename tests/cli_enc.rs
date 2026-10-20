@@ -70,7 +70,7 @@ fn test_and_list_with_password() {
         assert_eq!(stdout(&o), "OK\t6\t3677\n", "{f}");
         let o = run(&["l", "-psecret", &fixture(f)]);
         assert_eq!(o.status.code(), Some(0), "{f}");
-        assert!(stdout(&o).contains("\tb.bin\n"), "{f}");
+        assert!(stdout(&o).contains("  b.bin\n"), "{f}");
     }
     let o = run(&["t", "-ppässwörd€", &fixture("aes_unicode_pw.7z")]);
     assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
