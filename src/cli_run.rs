@@ -59,7 +59,8 @@ use crate::wim_write::{WimWriteCompression, WimWriteError, WimWriteLimits, WimWr
 use crate::cli_stdio::{STDIN_LIMIT_ENV, StdioError, read_limited, run_add_stdio, stdin_limit, wants_stdio};
 use crate::cli_compat::{
     ArchiveType, Charset, CmdLineError, Command, CommandLine, EXIT_CMDLINE, EXIT_FATAL, EXIT_MEMORY, EXIT_OK,
-    EXIT_USER_STOP, EXIT_WARNING, NameItem, OverwriteMode, Recurse, StreamTarget, has_wildcard, parse_command_line,
+    EXIT_USER_STOP, EXIT_WARNING, NameItem, OverwriteMode, PathPolicy, Recurse, StreamTarget, has_wildcard,
+    parse_command_line,
 };
 use crate::cli_seam::listfile::{ListFileError, parse_listfile};
 use crate::cli_seam::slt_format::{SltEntry, format_entry};
@@ -167,16 +168,131 @@ pub fn run_args(command: Command, args: &[OsString], con: &mut Console<'_>) -> i
 
 /// Run a parsed command line. Returns the 7-Zip exit code.
 pub fn run(cl: &CommandLine, con: &mut Console<'_>) -> i32 {
+    let started = std::time::Instant::now();
     // With -so, standard output carries data only.
     let out_to = if cl.to_stdout && cl.stdout_to == StreamTarget::Stdout { StreamTarget::Stderr } else { cl.stdout_to };
     let mut ui = Ui { con, out_to, err_to: cl.stderr_to, write_failed: false };
-    let code = match cl.command {
-        Command::List | Command::Test => run_read(cl, &mut ui),
-        Command::Extract | Command::ExtractFlat => run_extract(cl, &mut ui),
-        Command::Add => run_add(cl, &mut ui),
-    };
+    let multi = !cl.archive_includes.is_empty() || !cl.archive_excludes.is_empty();
+    let code = if multi && cl.command != Command::Add { run_multi(cl, &mut ui) } else { dispatch(cl, &mut ui) };
+    if cl.timing {
+        ui.out(&timing_report(started.elapsed()));
+    }
     ui.flush();
     if ui.write_failed && code < EXIT_FATAL { EXIT_FATAL } else { code }
+}
+
+fn dispatch(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
+    match cl.command {
+        Command::List | Command::Test => run_read(cl, ui),
+        Command::Extract | Command::ExtractFlat => run_extract(cl, ui),
+        Command::Add => run_add(cl, ui),
+    }
+}
+
+/// `-bt` report. Only wall-clock time is available without platform calls,
+/// so the line uses 7-Zip's `Global Time` label.
+pub fn timing_report(elapsed: std::time::Duration) -> String {
+    format!("\nGlobal  Time = {:9.3} =  100%\n", elapsed.as_secs_f64())
+}
+
+// ---------------------------------------------------------------------------
+// -ai / -ax: several archives per command
+// ---------------------------------------------------------------------------
+
+/// Path text used for `-ax` matching: relative paths without a leading `./`.
+fn archive_match_text(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    let mut t: &str = &s;
+    while let Some(rest) = t.strip_prefix("./") {
+        t = rest;
+    }
+    t.to_string()
+}
+
+/// Archives selected by the positional archive name, `-ai` and `-ax`, in
+/// sorted order without duplicates. Wildcards are expanded against the file
+/// system (`r` searches subdirectories); only regular files are kept.
+pub fn select_archives(cl: &CommandLine) -> Result<Vec<PathBuf>, String> {
+    let cs = cl.wildcard_case_sensitive();
+    // -r does not apply to archive names: only the rule's own r modifier.
+    let mut local = cl.clone();
+    local.recurse = None;
+    let inc = expand_items(cl.archive_includes.iter().map(|r| (&r.item, r.recurse)), &local).map_err(|e| e.message())?;
+    let exc = expand_items(cl.archive_excludes.iter().map(|r| (&r.item, r.recurse)), &local).map_err(|e| e.message())?;
+    let mut found: Vec<PathBuf> = Vec::new();
+    let expand = |spec: &NameSpec, found: &mut Vec<PathBuf>| -> Result<(), String> {
+        let text = spec.name.to_string_lossy();
+        if has_wildcard(&text) || (spec.recursive && !text.contains(['/', '\\'])) {
+            let mut inputs = Vec::new();
+            expand_wildcard(spec, cs, &mut inputs).map_err(|e| collect_msg(e).to_string())?;
+            found.extend(inputs.into_iter().map(|i| i.path).filter(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file())));
+        } else if std::fs::metadata(&spec.name).is_ok_and(|m| m.is_file()) {
+            found.push(PathBuf::from(&spec.name));
+        }
+        if found.len() > MAX_WILDCARD_MATCHES {
+            return Err(collect_msg(CollectError::LimitExceeded).to_string());
+        }
+        Ok(())
+    };
+    if let Some(a) = cl.archive.as_deref() {
+        let text = a.to_string_lossy();
+        if std::fs::symlink_metadata(a).is_err() && has_wildcard(&text) {
+            expand(&NameSpec { name: a.as_os_str().to_os_string(), recursive: false }, &mut found)?;
+        } else {
+            // Opened (and reported) as given, even when missing.
+            found.push(a.to_path_buf());
+        }
+    }
+    for spec in &inc {
+        expand(spec, &mut found)?;
+    }
+    let excluded = |p: &Path| {
+        let t = archive_match_text(p);
+        exc.iter().any(|s| match_path(&s.name.to_string_lossy(), &t, s.recursive, cs))
+    };
+    found.retain(|p| !excluded(p));
+    let mut found: Vec<PathBuf> = found
+        .into_iter()
+        .map(|p| if p.is_relative() && p.starts_with(".") { PathBuf::from(archive_match_text(&p)) } else { p })
+        .collect();
+    found.sort();
+    found.dedup();
+    Ok(found)
+}
+
+fn run_multi(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
+    let archives = match select_archives(cl) {
+        Ok(a) => a,
+        Err(m) => {
+            ui.err(&m);
+            return EXIT_FATAL;
+        }
+    };
+    if archives.is_empty() {
+        ui.err("no archives matched (-ai/-ax)");
+        return EXIT_FATAL;
+    }
+    let headed = archives.len() > 1 && !cl.no_headers && matches!(cl.command, Command::List | Command::Test);
+    let mut code = EXIT_OK;
+    for a in &archives {
+        if headed {
+            ui.out(&format!("Archive: {}\n", os_display(a)));
+        }
+        let mut sub = cl.clone();
+        sub.archive = Some(a.clone());
+        sub.archive_includes.clear();
+        sub.archive_excludes.clear();
+        sub.no_archive_name = false;
+        let c = dispatch(&sub, ui);
+        if c == EXIT_USER_STOP {
+            return c;
+        }
+        code = code.max(c);
+    }
+    if headed {
+        ui.out(&format!("Archives: {}\n", archives.len()));
+    }
+    code
 }
 
 // ---------------------------------------------------------------------------
@@ -556,6 +672,10 @@ fn open_reader<'b>(input: &'b Input, cl: &CommandLine, ui: &mut Ui<'_, '_>) -> R
         }
         Err(OpenCryptError::Reader(e)) => return Err(reader_error(ui, e)),
     };
+    if let Some(t) = excluded_type(cl, detect_format(buf), opened.reader.format()) {
+        ui.err(&format!("cannot open the file as archive: type {t} is excluded (-stx)"));
+        return Err(EXIT_FATAL);
+    }
     let expected = match cl.archive_type {
         Some(ArchiveType::Lzh) => Some(ArchiveFormat::Lzh),
         Some(ArchiveType::Arj) => Some(ArchiveFormat::Arj),
@@ -569,6 +689,34 @@ fn open_reader<'b>(input: &'b Input, cl: &CommandLine, ui: &mut Ui<'_, '_>) -> R
         return Err(EXIT_FATAL);
     }
     Ok(opened)
+}
+
+/// Canonical `-stx` name.
+fn canonical_type(t: &str) -> &str {
+    match t {
+        "gz" => "gzip",
+        "bz2" => "bzip2",
+        "lha" => "lzh",
+        "zst" => "zstd",
+        other => other,
+    }
+}
+
+/// The `-stx` type that excludes this archive, by its outer container or the
+/// format it opened as.
+fn excluded_type(cl: &CommandLine, outer: Detected, opened: ArchiveFormat) -> Option<String> {
+    let outer = match outer {
+        Detected::Gzip => Some("gzip"),
+        Detected::Bzip2 => Some("bzip2"),
+        Detected::Xz => Some("xz"),
+        _ => None,
+    };
+    let inner = format_name(opened).to_ascii_lowercase();
+    cl.exclude_types
+        .iter()
+        .map(|t| canonical_type(t))
+        .find(|t| Some(*t) == outer || *t == inner)
+        .map(str::to_string)
 }
 
 /// 7-Zip reports password trouble as a fatal error (exit 2).
@@ -885,12 +1033,63 @@ fn split_groups(cl: &CommandLine, entries: &[PlannedEntry], chosen: &[usize]) ->
             rel.map.push(i);
         }
     }
+    if cl.eliminate_root_dup && !flat {
+        eliminate_root(&mut rel, cl.output_dir.as_deref());
+    }
     if flat {
         let (planned, m) = flatten(&rel.planned);
         rel.map = m.iter().map(|&k| rel.map[k]).collect();
         rel.planned = planned;
     }
     [rel, abs].into_iter().filter(|g| !g.planned.is_empty()).collect()
+}
+
+/// First path component (`/` or `\\` separated, empty components skipped).
+fn first_component(path: &[u8]) -> &[u8] {
+    path.split(|&b| b == b'/' || b == b'\\').find(|c| !c.is_empty()).unwrap_or(b"")
+}
+
+/// `path` without its first component and the separators after it.
+fn strip_first_component(path: &[u8]) -> Vec<u8> {
+    let start = path.iter().position(|&b| b != b'/' && b != b'\\').unwrap_or(path.len());
+    let rest = &path[start..];
+    let end = rest.iter().position(|&b| b == b'/' || b == b'\\').unwrap_or(rest.len());
+    let tail = &rest[end..];
+    let skip = tail.iter().position(|&b| b != b'/' && b != b'\\').unwrap_or(tail.len());
+    tail[skip..].to_vec()
+}
+
+/// `-spe`: when every member lies under one root folder named like the
+/// output folder, extract that folder's contents straight into it.
+fn eliminate_root(g: &mut Group, out_dir: Option<&Path>) {
+    let named = match out_dir {
+        Some(d) => d.file_name().map(|n| n.as_encoded_bytes().to_vec()),
+        None => std::env::current_dir().ok().and_then(|d| d.file_name().map(|n| n.as_encoded_bytes().to_vec())),
+    };
+    let Some(root) = named else { return };
+    if root.is_empty() || g.planned.is_empty() || !g.planned.iter().all(|e| first_component(&e.path) == root.as_slice()) {
+        return;
+    }
+    let mut planned = Vec::with_capacity(g.planned.len());
+    let mut map = Vec::with_capacity(g.map.len());
+    for (e, &m) in g.planned.iter().zip(&g.map) {
+        let path = strip_first_component(&e.path);
+        if path.is_empty() {
+            // The duplicated root folder itself.
+            continue;
+        }
+        let mut s = e.clone();
+        s.path = path;
+        if let EntryKind::Hardlink { target } = &e.kind
+            && first_component(target) == root.as_slice()
+        {
+            s.kind = EntryKind::Hardlink { target: strip_first_component(target) };
+        }
+        planned.push(s);
+        map.push(m);
+    }
+    g.planned = planned;
+    g.map = map;
 }
 
 #[derive(Default)]
@@ -1007,7 +1206,7 @@ fn run_extract(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
 
     // Overwrite mode: -ao wins, then -y, then the interactive prompt.
     let mut mode = cl.overwrite.or(if cl.yes { Some(OverwriteMode::All) } else { None });
-    if mode.is_none() && ui.con.interactive && cl.stdin.is_none() && ui.con.stdin.is_some() {
+    if mode.is_none() && cl.path_policy.is_none() && ui.con.interactive && cl.stdin.is_none() && ui.con.stdin.is_some() {
         let existing: Vec<PathBuf> = plans.iter().flat_map(|(root, plan)| conflicts(plan, root)).map(|(_, p)| p).collect();
         if let Some(first) = existing.first() {
             match prompt_overwrite(ui, first, existing.len()) {
@@ -1020,7 +1219,12 @@ fn run_extract(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         }
     }
     let policy = match mode {
-        None | Some(OverwriteMode::RenameExisting) => OverwritePolicy::Error,
+        None => match cl.path_policy {
+            None | Some(PathPolicy::Fail) => OverwritePolicy::Error,
+            Some(PathPolicy::Continue) => OverwritePolicy::Skip,
+            Some(PathPolicy::Replace) => OverwritePolicy::Overwrite,
+        },
+        Some(OverwriteMode::RenameExisting) => OverwritePolicy::Error,
         Some(OverwriteMode::All) => OverwritePolicy::Overwrite,
         Some(OverwriteMode::Skip) => OverwritePolicy::Skip,
         Some(OverwriteMode::RenameNew) => OverwritePolicy::Rename,
@@ -1404,16 +1608,19 @@ fn gather(cl: &CommandLine, ui: &mut Ui<'_, '_>, inputs: &[AddInput], sel: &Sele
     Ok(out)
 }
 
-fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
+fn write_atomically(path: &Path, bytes: &[u8], work_dir: Option<&Path>) -> Result<(), String> {
     let mut tmp_name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
     tmp_name.push(format!(".sediment-tmp-{}", std::process::id()));
-    let tmp = path.with_file_name(tmp_name);
+    let tmp = match work_dir {
+        Some(d) => d.join(&tmp_name),
+        None => path.with_file_name(&tmp_name),
+    };
     let res = (|| -> std::io::Result<()> {
         let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
         drop(f);
-        std::fs::rename(&tmp, path)
+        move_into_place(&tmp, path)
     })();
     if let Err(e) = res {
         let _ = std::fs::remove_file(&tmp);
@@ -1434,6 +1641,56 @@ struct WriteMethods {
 fn mmt_switch(m: &OsStr) -> Option<Option<usize>> {
     let s = m.to_string_lossy().to_ascii_lowercase();
     s.strip_prefix("-mmt").map(crate::mt_pool::parse_mmt)
+}
+
+/// Rename `from` onto `to`; across file systems (`-w` on another volume),
+/// copy to a temporary sibling of `to` first so the replacement stays atomic.
+pub fn move_into_place(from: &Path, to: &Path) -> std::io::Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    let mut name = to.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    name.push(format!(".sediment-mv-{}", std::process::id()));
+    let sibling = to.with_file_name(name);
+    let res = std::fs::copy(from, &sibling).and_then(|_| std::fs::File::open(&sibling)?.sync_all()).and_then(|_| std::fs::rename(&sibling, to));
+    if res.is_err() {
+        let _ = std::fs::remove_file(&sibling);
+        return res;
+    }
+    std::fs::remove_file(from)
+}
+
+/// Newest modification time among an archive's entries (`-stl`).
+pub fn newest_entry_mtime(bytes: &[u8], name: &[u8], password: Option<&str>) -> Option<i64> {
+    let opened = open_named_with_password(bytes, name, ReaderLimits::default(), password).ok()?;
+    opened.reader.entries().iter().filter_map(|e| e.mtime).max()
+}
+
+/// Set `path`'s modification time to `secs` since the Unix epoch.
+pub fn set_file_mtime(path: &Path, secs: i64) -> std::io::Result<()> {
+    let t = if secs >= 0 {
+        std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(secs.unsigned_abs()))
+    } else {
+        std::time::UNIX_EPOCH.checked_sub(std::time::Duration::from_secs(secs.unsigned_abs()))
+    };
+    let t = t.ok_or(std::io::ErrorKind::InvalidInput)?;
+    std::fs::OpenOptions::new().write(true).open(path)?.set_modified(t)
+}
+
+/// `-stl` for an archive file just written: its mtime becomes the newest
+/// entry's. Archives without entry times are left alone.
+pub fn apply_stl(path: &Path, password: Option<&str>) -> Result<(), String> {
+    let f = std::fs::File::open(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+    let mut bytes = Vec::new();
+    f.take(MAX_ARCHIVE + 1).read_to_end(&mut bytes).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    if bytes.len() as u64 > MAX_ARCHIVE {
+        return Err(format!("{} exceeds the size limit", path.display()));
+    }
+    let name = file_name_bytes(path);
+    if let Some(t) = newest_entry_mtime(&bytes, &name, password) {
+        set_file_mtime(path, t).map_err(|e| format!("cannot set time of {}: {e}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn build_archive(
@@ -1661,10 +1918,18 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         ui.err(&format!("warning: {}: no such file or no match", m.to_string_lossy()));
         warned = true;
     }
+    if warned && cl.stop_on_open_error {
+        ui.err("stopped: an input could not be opened (-sse)");
+        return EXIT_FATAL;
+    }
     let g = match gather(cl, ui, &exp.inputs, &sel) {
         Ok(g) => g,
         Err(c) => return c,
     };
+    if g.warned && cl.stop_on_open_error {
+        ui.err("stopped: an input could not be opened (-sse)");
+        return EXIT_FATAL;
+    }
     warned |= g.warned;
     if g.entries.is_empty() {
         ui.err("warning: no files to add; archive not written");
@@ -1694,9 +1959,15 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
                 return if e == VolumeError::Allocation { EXIT_MEMORY } else { EXIT_FATAL };
             }
         }
-    } else if let Err(m) = write_atomically(archive, &bytes) {
+    } else if let Err(m) = write_atomically(archive, &bytes, cl.work_dir.as_deref()) {
         ui.err(&m);
         return EXIT_FATAL;
+    } else if cl.archive_time_from_newest
+        && let Some(t) = g.entries.iter().map(|e| e.mtime).max()
+        && let Err(e) = set_file_mtime(archive, t)
+    {
+        ui.err(&format!("warning: cannot set archive time (-stl): {e}"));
+        warned = true;
     }
     if cl.log_level >= 1 {
         for e in &g.entries {

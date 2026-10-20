@@ -12,6 +12,7 @@
 //!   u [switches] ARCHIVE PATHS...      add new / replace newer files (see `cli_update`)
 //!   d [-r] ARCHIVE PATTERNS...         delete entries by wildcard (see `cli_update`)
 //!   rn ARCHIVE OLD NEW [OLD NEW...]    rename entries (see `cli_update`)
+//!   i                                  supported formats, codecs, hashers (see `cli_info`)
 //!   list|test ARCHIVE         original ZIP-only commands (frozen output)
 //! Readable formats for l/t/x/e: zip, tar, gzip/bzip2/xz single streams,
 //!   tar.gz/tgz, tar.bz2/tbz2/tbz, tar.xz/txz, 7z, cpio, ar, deb, rpm and
@@ -35,7 +36,8 @@ use std::process;
 use sediment_engine::archive_name::escape_name;
 use sediment_engine::cli_bench::run_bench;
 use sediment_engine::cli_hash::run_hash;
-use sediment_engine::cli_update::{run_delete, run_rename, run_update};
+use sediment_engine::cli_info::run_info;
+use sediment_engine::cli_update::{run_delete, run_rename, run_update, run_with_tail};
 use sediment_engine::cli_compat::Command;
 use sediment_engine::cli_run::{Console, run_args};
 use sediment_engine::zip_decode::entry_data;
@@ -91,12 +93,14 @@ fn main() {
         process::exit(run_hash(&rest));
     } else if cmd == "b" {
         process::exit(run_bench(&rest));
+    } else if cmd == "i" || cmd == "I" {
+        process::exit(run_info(&rest, &mut io::stdout().lock(), &mut io::stderr().lock()));
     } else if cmd == "u" {
-        process::exit(run_update(&rest));
+        process::exit(run_with_tail(&rest, run_update));
     } else if cmd == "d" {
-        process::exit(run_delete(&rest));
+        process::exit(run_with_tail(&rest, run_delete));
     } else if cmd == "rn" {
-        process::exit(run_rename(&rest));
+        process::exit(run_with_tail(&rest, run_rename));
     } else {
         err("unknown command", 2);
     }
