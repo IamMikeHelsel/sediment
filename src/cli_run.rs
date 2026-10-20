@@ -52,7 +52,7 @@ use crate::archive_open_crypt::{OpenCryptError, OpenedArchive, PasswordProblem, 
 use crate::archive_open_ext::open_stdin_ext;
 use crate::cli_crypt::{CryptSwitches, run_add_crypt, take_crypt_switches};
 use crate::archive_reader::{ArchiveFormat, ArchiveReader, ReaderError, ReaderLimits};
-use crate::cli_add::{ArchiveFormat as AddFormat, format_from_name};
+use crate::cli_add::{ArchiveFormat as AddFormat, format_from_name, tar_format_from_switches, zip_method_from_switches};
 use crate::cli_add_7z::parse_7z_add_args;
 use crate::cli_stdio::{STDIN_LIMIT_ENV, StdioError, read_limited, run_add_stdio, stdin_limit, wants_stdio};
 use crate::cli_compat::{
@@ -73,9 +73,9 @@ use crate::fs_collect::{
     read_entry_data,
 };
 use crate::sevenz_write::{SevenZWriteError, SevenZWriteLimits, SevenZWriteOptions, create_7z};
-use crate::tar_create::{TarCreateError, TarCreateLimits, create_tar};
+use crate::tar_create::{TarCreateError, TarCreateLimits, TarFormat, create_tar, create_tar_with_format};
 use crate::volume_io::{VolumeError, first_volume_base, read_volumes, write_volumes};
-use crate::zip_create::{ZipCreateError, ZipCreateLimits, ZipCreateOptions, create_zip};
+use crate::zip_create::{ZipCreateError, ZipCreateLimits, ZipCreateOptions, ZipMethod, create_zip_with_method};
 
 /// Largest archive read by `l`/`t`/`x`/`e`.
 pub const MAX_ARCHIVE: u64 = 1 << 30;
@@ -1405,10 +1405,18 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Per-format write options from the `-m` switches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WriteMethods {
+    zip: ZipMethod,
+    tar: Option<TarFormat>,
+}
+
 fn build_archive(
     target: AddTarget,
     level: u8,
     sevenz: &SevenZWriteOptions,
+    wm: WriteMethods,
     g: &Gathered,
     ui: &mut Ui<'_, '_>,
 ) -> Result<Vec<u8>, i32> {
@@ -1424,7 +1432,7 @@ fn build_archive(
     }
     let entries: Vec<_> = g.entries.iter().zip(datas.iter()).map(|(e, d)| e.as_archive_entry(d)).collect();
     let built = match target {
-        AddTarget::Zip => match create_zip(&entries, ZipCreateOptions { level }, ZipCreateLimits::default()) {
+        AddTarget::Zip => match create_zip_with_method(&entries, ZipCreateOptions { level }, wm.zip, ZipCreateLimits::default()) {
             Ok(z) => {
                 for &i in &z.skipped {
                     ui.err(&format!(
@@ -1440,7 +1448,10 @@ fn build_archive(
                 return Err(EXIT_FATAL);
             }
         },
-        AddTarget::Tar(c) => match create_tar(&entries, TarCreateLimits::default()) {
+        AddTarget::Tar(c) => match match wm.tar {
+            None => create_tar(&entries, TarCreateLimits::default()),
+            Some(f) => create_tar_with_format(&entries, f, TarCreateLimits::default()),
+        } {
             Ok(t) if c == Compression::None => Ok(t),
             Ok(t) => compress_stream(c, &t, level),
             Err(TarCreateError::Allocation) => Err(BuildError::Memory),
@@ -1546,12 +1557,23 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
                 return EXIT_CMDLINE;
             }
         }
-    } else if let Some(m) = cl.methods.first() {
-        ui.err(&format!("method switch applies to 7z archives only: {}", m.to_string_lossy()));
-        return EXIT_CMDLINE;
     } else {
         SevenZWriteOptions::default()
     };
+    let mut wm = WriteMethods { zip: ZipMethod::Deflate, tar: None };
+    let parsed = match target {
+        AddTarget::SevenZ => Ok(()),
+        AddTarget::Zip => zip_method_from_switches(&cl.methods).map(|m| wm.zip = m),
+        AddTarget::Tar(_) => tar_format_from_switches(&cl.methods).map(|f| wm.tar = f),
+        AddTarget::Stream(_) => match cl.methods.first() {
+            Some(m) => Err(format!("method switch is not supported for this archive type: {}", m.to_string_lossy())),
+            None => Ok(()),
+        },
+    };
+    if let Err(m) = parsed {
+        ui.err(&m);
+        return EXIT_CMDLINE;
+    }
     if cl.to_stdout && ui.con.stdout_is_terminal {
         ui.err("refusing to write archive data to a terminal (-so)");
         return EXIT_CMDLINE;
@@ -1599,7 +1621,7 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         return EXIT_WARNING;
     }
     let level = cl.level.unwrap_or(5);
-    let bytes = match build_archive(target, level, &sevenz, &g, ui) {
+    let bytes = match build_archive(target, level, &sevenz, wm, &g, ui) {
         Ok(b) => b,
         Err(c) => return c,
     };
