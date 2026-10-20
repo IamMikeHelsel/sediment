@@ -167,3 +167,4 @@ pub mod gzip_slt_info;
 pub mod partition_type_names;
 pub mod uefi_section_decode;
 pub mod bzip2_block_scan;
+pub mod method_switch_parse;
