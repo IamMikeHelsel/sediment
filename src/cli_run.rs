@@ -1048,7 +1048,12 @@ fn run_extract(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
                 if let Some(c) = password_error(ui, &opened, name) {
                     return c;
                 }
-                ui.err_entry(&format!("cannot extract ({:?})", f.error), name);
+                if f.error == ExtractError::Source(ReaderError::Unsupported) {
+                    // 7-Zip wording for an entry whose method has no decoder.
+                    ui.err_entry("Unsupported Method", name);
+                } else {
+                    ui.err_entry(&format!("cannot extract ({:?})", f.error), name);
+                }
                 return extract_error_code(f.error);
             }
         };

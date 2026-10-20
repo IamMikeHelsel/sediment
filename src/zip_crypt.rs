@@ -152,7 +152,8 @@ pub fn decrypt_payload(e: &Entry2<'_>, raw: &[u8], password: Option<&[u8]>) -> R
 }
 
 /// Decompress `data` with the entry's method into exactly `size` bytes.
-/// Supports Stored, Deflate, Deflate64 and BZip2 (method 12).
+/// Supports Stored, Deflate, Deflate64, BZip2 (12), LZMA (14), Zstandard
+/// (93), XZ (95) and PPMd var.I (98).
 pub fn decompress_entry(
     compression: Compression,
     data: &[u8],
@@ -174,6 +175,16 @@ pub fn decompress_entry(
         })?,
         Compression::Deflate64 => inflate64_raw_prefix(data, size, max_deflate_blocks).map_err(|_| ZipCryptError::Invalid)?.0,
         Compression::Other(12) => decode_bzip2(data, size).map_err(|_| ZipCryptError::Invalid)?,
+        // LZMA (14), Zstandard (93), XZ (95) and PPMd var.I (98) after
+        // decryption (WinZip AES `actual_method`) use the plain-zip decoder.
+        Compression::Other(m @ (14 | 93 | 95 | 98)) => {
+            crate::archive_reader::decode_zip_payload(m, data, size).map_err(|e| match e {
+                crate::archive_reader::ReaderError::Unsupported => ZipCryptError::Unsupported,
+                crate::archive_reader::ReaderError::Allocation => ZipCryptError::Allocation,
+                crate::archive_reader::ReaderError::LimitExceeded => ZipCryptError::LimitExceeded,
+                _ => ZipCryptError::Invalid,
+            })?
+        }
         Compression::Other(_) => return Err(ZipCryptError::Unsupported),
     };
     if out.len() != size {
@@ -499,7 +510,10 @@ mod tests {
     fn decompress_methods() {
         assert_eq!(decompress_entry(Compression::Stored, b"abc", 3, 16).unwrap(), b"abc");
         assert_eq!(decompress_entry(Compression::Stored, b"abc", 2, 16), Err(ZipCryptError::Invalid));
-        assert_eq!(decompress_entry(Compression::Other(14), b"abc", 2, 16), Err(ZipCryptError::Unsupported));
+        assert_eq!(decompress_entry(Compression::Other(97), b"abc", 2, 16), Err(ZipCryptError::Unsupported));
+        assert!(decompress_entry(Compression::Other(14), b"abc", 2, 16).is_err());
+        assert!(decompress_entry(Compression::Other(93), b"abc", 2, 16).is_err());
+        assert!(decompress_entry(Compression::Other(98), b"abc", 2, 16).is_err());
         assert!(decompress_entry(Compression::Deflate, b"\xff\xff", 2, 16).is_err());
     }
 }

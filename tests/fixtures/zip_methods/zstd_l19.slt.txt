@@ -1,0 +1,30 @@
+----------
+Path = a.txt
+Size = 750
+Attributes = A
+CRC = 748AA712
+
+Path = bin/data.bin
+Size = 10240
+Attributes = A
+CRC = BBCE3B9D
+
+Path = empty
+Size = 0
+Attributes = A
+CRC = 00000000
+
+Path = deep/x/y/z.txt
+Size = 7
+Attributes = A
+CRC = EBAB958D
+
+Path = café.txt
+Size = 11
+Attributes = A
+CRC = BF541A15
+
+Path = words.txt
+Size = 30004
+Attributes = A
+CRC = CB91CCC2
