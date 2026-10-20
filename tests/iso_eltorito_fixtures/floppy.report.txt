@@ -1,0 +1,5 @@
+El Torito catalog  : 33  1
+El Torito cat path : /boot.catalog
+El Torito images   :   N  Pltf  B   Emul  Ld_seg  Hdpt  Ldsiz         LBA
+El Torito boot img :   1  BIOS  y  fd1.4  0x0000  0x00      1          34
+El Torito img path :   1  /boot/floppy.img

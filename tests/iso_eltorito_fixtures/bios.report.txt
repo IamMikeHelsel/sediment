@@ -1,0 +1,5 @@
+El Torito catalog  : 33  1
+El Torito cat path : /boot.catalog
+El Torito images   :   N  Pltf  B   Emul  Ld_seg  Hdpt  Ldsiz         LBA
+El Torito boot img :   1  BIOS  y   none  0x0000  0x00      4          34
+El Torito img path :   1  /boot/boot.img
