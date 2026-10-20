@@ -70,11 +70,14 @@ pub struct ChmLimits {
     /// Largest number of decompressed bytes one read may produce (the reset
     /// interval containing an entry plus the entry itself).
     pub max_output: u64,
+    /// Total bytes [`ChmArchive::read_all`] may return across all entries
+    /// (same default as `ReaderLimits::max_total_size`).
+    pub max_total_size: u64,
 }
 
 impl Default for ChmLimits {
     fn default() -> Self {
-        ChmLimits { max_entries: 1_000_000, max_name_len: 4096, max_output: 1 << 30 }
+        ChmLimits { max_entries: 1_000_000, max_name_len: 4096, max_output: 1 << 30, max_total_size: 4 << 30 }
     }
 }
 
@@ -375,7 +378,9 @@ impl<'a> ChmArchive<'a> {
     }
 
     /// Read every entry, decoding the LZX section at most once (when it fits
-    /// `max_output`; otherwise entries are decoded one by one).
+    /// `max_output`; otherwise entries are decoded one by one). Entries past
+    /// [`ChmLimits::max_total_size`] bytes of output (entries may overlap)
+    /// return [`ChmError::LimitExceeded`].
     pub fn read_all(&self) -> Vec<Result<Vec<u8>, ChmError>> {
         let whole = match &self.lzx {
             Some(l)
@@ -386,21 +391,40 @@ impl<'a> ChmArchive<'a> {
             }
             _ => None,
         };
+        let mut remaining = self.limits.max_total_size;
         self.entries
             .iter()
             .enumerate()
-            .map(|(i, e)| match (&whole, e.section) {
-                (Some(Ok(d)), 1) => {
-                    let end = e.offset.checked_add(e.length).ok_or(ChmError::InvalidEntry)?;
-                    if end > d.len() as u64 {
-                        return Err(ChmError::InvalidEntry);
-                    }
-                    Ok(d[e.offset as usize..end as usize].to_vec())
+            .map(|(i, e)| {
+                if e.length > remaining {
+                    return Err(ChmError::LimitExceeded);
                 }
-                (Some(Err(err)), 1) => Err(*err),
-                _ => self.read(i),
+                let r = self.read_one(i, e, &whole);
+                if let Ok(d) = &r {
+                    remaining = remaining.saturating_sub(d.len() as u64);
+                }
+                r
             })
             .collect()
+    }
+
+    fn read_one(
+        &self,
+        i: usize,
+        e: &ChmEntry,
+        whole: &Option<Result<Vec<u8>, ChmError>>,
+    ) -> Result<Vec<u8>, ChmError> {
+        match (whole, e.section) {
+            (Some(Ok(d)), 1) => {
+                let end = e.offset.checked_add(e.length).ok_or(ChmError::InvalidEntry)?;
+                if end > d.len() as u64 {
+                    return Err(ChmError::InvalidEntry);
+                }
+                Ok(d[e.offset as usize..end as usize].to_vec())
+            }
+            (Some(Err(err)), 1) => Err(*err),
+            _ => self.read(i),
+        }
     }
 
     /// Format-neutral entries: names ending in `/` are directories.
