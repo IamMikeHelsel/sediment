@@ -64,7 +64,11 @@ use crate::cli_compat::{
 };
 use crate::cli_seam::listfile::{ListFileError, parse_listfile};
 use crate::cli_seam::slt_format::{SltEntry, format_entry};
-use crate::cli_slt::{archive_header, format_table, format_table_row, generic_entry, sevenz_details, table_rows};
+use crate::console_report::{
+    Action, EntryProblem, OpenProblem, Totals as ConsoleTotals, action_line, add_summary, archive_block, creating_line, archive_extent, banner,
+    entry_error, error_summary, ok_summary, open_failure, scanning_archives_found, scanning_archives_head, scanning_drive,
+};
+use crate::cli_slt::{slt_path, archive_header, format_table, format_table_row, generic_entry, sevenz_details, table_rows};
 use crate::cli_seam::wildcard::{match_name, match_path};
 use crate::compress_wrap::{Compression, WrapError, compress_bound_for, compress_mt};
 use crate::extract_fs::{ExtractError, ExtractOptions, OverwritePolicy, SymlinkPolicy, execute_plan};
@@ -323,6 +327,10 @@ impl Ui<'_, '_> {
     fn err(&mut self, msg: &str) {
         self.write(self.err_to, &format!("sediment: {msg}\n"));
     }
+    /// Text for the error stream as is (7-Zip `ERROR:` lines).
+    fn raw_err(&mut self, s: &str) {
+        self.write(self.err_to, s);
+    }
     fn err_entry(&mut self, msg: &str, name: &[u8]) {
         self.err(&format!("{msg}: {}", shown(name)));
     }
@@ -334,6 +342,16 @@ impl Ui<'_, '_> {
             self.write_failed = true;
         }
     }
+}
+
+/// Member name as 7-Zip prints it: UTF-8 as is (escaped only when not
+/// printable), directories with a trailing slash.
+fn console_name(name: &[u8], is_dir: bool) -> String {
+    let mut s = slt_path(name);
+    if is_dir {
+        s.push('/');
+    }
+    s
 }
 
 fn shown(name: &[u8]) -> String {
@@ -638,7 +656,63 @@ fn open_stream(bytes: &[u8], t: ArchiveType, file_name: &[u8], limits: ReaderLim
     Ok(StreamReader::new(format, name, data, mtime, crc))
 }
 
-fn open_reader<'b>(input: &'b Input, cl: &CommandLine, ui: &mut Ui<'_, '_>) -> Result<OpenedArchive<'b>, i32> {
+/// 7-Zip type name of a recognised (but maybe damaged) archive.
+fn detected_name(d: Detected) -> Option<&'static str> {
+    Some(match d {
+        Detected::Zip => "zip",
+        Detected::Gzip => "gzip",
+        Detected::Bzip2 => "bzip2",
+        Detected::Xz => "xz",
+        Detected::SevenZip => "7z",
+        Detected::Tar | Detected::TarHeuristic => "tar",
+        Detected::Cpio => "cpio",
+        Detected::Ar => "ar",
+        Detected::Rpm => "rpm",
+        Detected::Xar => "xar",
+        _ => return None,
+    })
+}
+
+/// Report an archive that did not open. In console mode (`t`/`x`/`e`,
+/// `console` = the displayed name) the 7-Zip "Can't open as archive" block
+/// is printed; otherwise the plain `sediment:` message.
+fn open_failed(ui: &mut Ui<'_, '_>, console: Option<&str>, input: &Input, buf: &[u8], e: ReaderError) -> i32 {
+    let Some(display) = console else {
+        return reader_error(ui, e);
+    };
+    let detected = detected_name(detect_format(buf));
+    // A single compressed stream opens in 7-Zip even when its data is bad;
+    // the damage is reported against the one member.
+    if let Some(t @ ("gzip" | "bzip2" | "xz")) = detected
+        && e != ReaderError::Allocation
+    {
+        let problem = match e {
+            ReaderError::CrcMismatch => EntryProblem::CrcFailed,
+            ReaderError::Truncated => EntryProblem::UnexpectedEnd,
+            _ => EntryProblem::DataError,
+        };
+        ui.out(&format!("--\nPath = {display}\nType = {t}\n\n"));
+        let gz_name = if t == "gzip" { parse_gzip_header(buf, 4096).ok().and_then(|h| h.name.as_deref().and_then(gzip_member_name)) } else { None };
+        let member = gz_name.unwrap_or_else(|| stream_member_name(&input.name));
+        ui.raw_err(&entry_error(problem, &console_name(&member, false)));
+        ui.out(&error_summary(1));
+        return EXIT_FATAL;
+    }
+    // zip/7z whose recorded end lies beyond the file were cut short.
+    let cut = matches!(detected, Some("zip" | "7z")) && archive_extent(detected.unwrap_or(""), buf).is_none();
+    let problem = match e {
+        ReaderError::Allocation => return reader_error(ui, e),
+        ReaderError::Truncated => OpenProblem::UnexpectedEnd,
+        _ if cut => OpenProblem::UnexpectedEnd,
+        _ => OpenProblem::HeadersError,
+    };
+    let (out, err) = open_failure(display, detected, problem);
+    ui.raw_err(&err);
+    ui.out(&out);
+    EXIT_FATAL
+}
+
+fn open_reader<'b>(input: &'b Input, cl: &CommandLine, ui: &mut Ui<'_, '_>, console: Option<&str>) -> Result<OpenedArchive<'b>, i32> {
     let buf = &input.bytes;
     let limits = ReaderLimits::default();
     if let Some(t) = cl.archive_type {
@@ -649,7 +723,7 @@ fn open_reader<'b>(input: &'b Input, cl: &CommandLine, ui: &mut Ui<'_, '_>) -> R
         if matches!(t, ArchiveType::Gzip | ArchiveType::Bzip2 | ArchiveType::Xz) {
             return match open_stream(buf, t, &input.name, limits) {
                 Ok(r) => Ok(OpenedArchive::plain(Box::new(r))),
-                Err(e) => Err(reader_error(ui, e)),
+                Err(e) => Err(open_failed(ui, console, input, buf, e)),
             };
         }
     }
@@ -658,7 +732,16 @@ fn open_reader<'b>(input: &'b Input, cl: &CommandLine, ui: &mut Ui<'_, '_>) -> R
     let opened = if input.from_stdin && !matches!(detect_format(buf), Detected::Zip | Detected::SevenZip) {
         open_stdin_ext(buf, limits).map(OpenedArchive::plain).map_err(OpenCryptError::Reader)
     } else {
-        open_named_with_password(buf, &input.name, limits, cl.password.as_deref())
+        let first = open_named_with_password(buf, &input.name, limits, cl.password.as_deref());
+        // Data after the end of a zip/7z archive (7-Zip: "There are data
+        // after the end of archive"): open the archive part only.
+        let end = detected_name(detect_format(buf)).and_then(|t| archive_extent(t, buf));
+        match (first, end) {
+            (Err(OpenCryptError::Reader(_)), Some(end)) if end < buf.len() as u64 => {
+                open_named_with_password(&buf[..end as usize], &input.name, limits, cl.password.as_deref())
+            }
+            (r, _) => r,
+        }
     };
     let opened = match opened {
         Ok(o) => o,
@@ -667,10 +750,17 @@ fn open_reader<'b>(input: &'b Input, cl: &CommandLine, ui: &mut Ui<'_, '_>) -> R
             return Err(EXIT_FATAL);
         }
         Err(OpenCryptError::WrongPassword) => {
-            ui.err("cannot open encrypted archive. Wrong password?");
+            match console {
+                Some(display) => {
+                    let (out, err) = open_failure(display, Some("7z"), OpenProblem::WrongPassword);
+                    ui.raw_err(&err);
+                    ui.out(&out);
+                }
+                None => ui.err("cannot open encrypted archive. Wrong password?"),
+            }
             return Err(EXIT_FATAL);
         }
-        Err(OpenCryptError::Reader(e)) => return Err(reader_error(ui, e)),
+        Err(OpenCryptError::Reader(e)) => return Err(open_failed(ui, console, input, buf, e)),
     };
     if let Some(t) = excluded_type(cl, detect_format(buf), opened.reader.format()) {
         ui.err(&format!("cannot open the file as archive: type {t} is excluded (-stx)"));
@@ -757,26 +847,119 @@ fn format_name(f: ArchiveFormat) -> &'static str {
 // l / t
 // ---------------------------------------------------------------------------
 
+/// 7-Zip console framing of one `t`/`x`/`e` run (see [`crate::console_report`]).
+struct Framing {
+    display: String,
+    /// Bytes after the end of the archive ("There are data after the end of archive").
+    tail: u64,
+    compressed: u64,
+}
+
+impl Framing {
+    /// Banner and "Scanning the drive for archives:" (not with `-ba`).
+    fn start(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> Framing {
+        if !cl.no_headers {
+            ui.out(&banner());
+            ui.out(scanning_archives_head());
+        }
+        let display = cl.archive.as_deref().map_or_else(|| String::from("stdin"), os_display);
+        Framing { display, tail: 0, compressed: 0 }
+    }
+
+    /// The archive was read: its size, then the "Testing archive:" line.
+    fn loaded(&mut self, cl: &CommandLine, ui: &mut Ui<'_, '_>, action: Action, input: &Input) {
+        self.compressed = input.bytes.len() as u64;
+        if !cl.no_headers {
+            ui.out(&scanning_archives_found(1, self.compressed));
+        }
+        ui.out(&action_line(action, &self.display));
+    }
+
+    /// The archive opened: the `--` property block.
+    fn opened(&mut self, ui: &mut Ui<'_, '_>, reader: &dyn ArchiveReader, input: &Input) {
+        let type_name = format_name(reader.format());
+        let buf = &input.bytes;
+        let physical = archive_extent(type_name, buf).unwrap_or(buf.len() as u64);
+        self.tail = (buf.len() as u64).saturating_sub(physical);
+        let extra = match reader.format() {
+            ArchiveFormat::SevenZ => sevenz_details(buf, ReaderLimits::default()).map(|(h, _)| h).unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        ui.out(&archive_block(&self.display, type_name, physical, self.tail, &extra));
+        ui.out("\n");
+    }
+
+    /// Summary and exit code once every member was handled.
+    fn finish(&self, ui: &mut Ui<'_, '_>, totals: ConsoleTotals, errors: u64, code: i32) -> i32 {
+        if errors > 0 {
+            ui.out(&error_summary(errors));
+            return code.max(EXIT_FATAL);
+        }
+        ui.out(&ok_summary(ConsoleTotals { compressed: self.compressed, ..totals }, u64::from(self.tail > 0)));
+        code
+    }
+}
+
+/// Folders, files and file bytes of the chosen members (7-Zip counts archive items).
+fn item_totals(reader: &dyn ArchiveReader, chosen: &[usize]) -> ConsoleTotals {
+    let mut t = ConsoleTotals::default();
+    for &i in chosen {
+        let e = &reader.entries()[i];
+        if matches!(e.kind, EntryKind::Dir) {
+            t.folders += 1;
+        } else {
+            t.files += 1;
+            t.size = t.size.saturating_add(e.size);
+        }
+    }
+    t
+}
+
+/// What went wrong with one member, for the 7-Zip `ERROR:` line.
+fn entry_problem(opened: &OpenedArchive<'_>, e: ReaderError) -> EntryProblem {
+    if opened.password_problem() == Some(PasswordProblem::Wrong) {
+        return if opened.reader.format() == ArchiveFormat::SevenZ {
+            EntryProblem::WrongPasswordEncrypted
+        } else {
+            EntryProblem::WrongPassword
+        };
+    }
+    match e {
+        ReaderError::CrcMismatch => EntryProblem::CrcFailed,
+        ReaderError::Unsupported => EntryProblem::UnsupportedMethod,
+        _ => EntryProblem::DataError,
+    }
+}
+
 fn run_read(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
     let (_, sel) = match build_selector(cl, ui) {
         Ok(s) => s,
         Err(c) => return c,
     };
+    let mut framing = (cl.command == Command::Test).then(|| Framing::start(cl, ui));
     let input = match load_input(cl, ui) {
         Ok(b) => b,
         Err(c) => return c,
     };
-    let opened = match open_reader(&input, cl, ui) {
+    if let Some(f) = framing.as_mut() {
+        f.loaded(cl, ui, Action::Testing, &input);
+    }
+    let display = framing.as_ref().map(|f| f.display.clone());
+    let opened = match open_reader(&input, cl, ui, display.as_deref()) {
         Ok(r) => r,
         Err(c) => return c,
     };
     let reader = opened.reader.as_ref();
     let chosen: Vec<usize> = (0..reader.entries().len()).filter(|&i| sel.selects(&reader.entries()[i].path)).collect();
-    if cl.command == Command::List {
-        list(cl, ui, reader, &chosen, &input.bytes);
-        EXIT_OK
-    } else {
-        test(cl, ui, &opened, &chosen)
+    match framing.as_mut() {
+        None => {
+            list(cl, ui, reader, &chosen, &input.bytes);
+            EXIT_OK
+        }
+        Some(f) => {
+            f.opened(ui, reader, &input);
+            test(cl, ui, &opened, &chosen, f)
+        }
     }
 }
 
@@ -821,40 +1004,34 @@ fn list(cl: &CommandLine, ui: &mut Ui<'_, '_>, reader: &dyn ArchiveReader, chose
     ui.out(&format_table(&rows));
 }
 
-fn test(cl: &CommandLine, ui: &mut Ui<'_, '_>, opened: &OpenedArchive<'_>, chosen: &[usize]) -> i32 {
+fn test(cl: &CommandLine, ui: &mut Ui<'_, '_>, opened: &OpenedArchive<'_>, chosen: &[usize], framing: &Framing) -> i32 {
     let reader = opened.reader.as_ref();
-    let mut total: u64 = 0;
     let mut code = EXIT_OK;
+    let mut errors: u64 = 0;
     for &i in chosen {
         let e = &reader.entries()[i];
         if cl.log_level >= 1 {
-            ui.out(&format!("T {}\n", shown(&e.path)));
+            ui.out(&format!("T {}\n", console_name(&e.path, matches!(e.kind, EntryKind::Dir))));
         }
-        match reader.read(i) {
-            Ok(d) if !matches!(e.kind, EntryKind::File) || d.len() as u64 == e.size => {}
-            Err(_) if opened.password_problem().is_some() => {
-                // A missing or wrong password stops the whole test, as in 7-Zip.
+        let problem = match reader.read(i) {
+            Ok(d) if !matches!(e.kind, EntryKind::File) || d.len() as u64 == e.size => continue,
+            Ok(_) => EntryProblem::DataError,
+            Err(_) if opened.password_problem() == Some(PasswordProblem::Required) => {
+                // No password at all: stop, as 7-Zip does without a prompt.
                 return password_error(ui, opened, &e.path).unwrap_or(EXIT_FATAL);
-            }
-            Err(ReaderError::Unsupported) => {
-                ui.err_entry("unsupported compression method", &e.path);
-                code = code.max(EXIT_FATAL);
             }
             Err(ReaderError::Allocation) => {
                 ui.err_entry("allocation failed", &e.path);
                 code = EXIT_MEMORY;
+                errors += 1;
+                continue;
             }
-            _ => {
-                ui.err_entry("data error", &e.path);
-                code = code.max(EXIT_FATAL);
-            }
-        }
-        total = total.saturating_add(e.size);
+            Err(err) => entry_problem(opened, err),
+        };
+        ui.raw_err(&entry_error(problem, &console_name(&e.path, false)));
+        errors += 1;
     }
-    if code == EXIT_OK && !cl.no_headers {
-        ui.out(&format!("OK\t{}\t{total}\n", chosen.len()));
-    }
-    code
+    framing.finish(ui, item_totals(reader, chosen), errors, code)
 }
 
 // ---------------------------------------------------------------------------
@@ -1155,20 +1332,27 @@ fn run_extract(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         Ok(s) => s,
         Err(c) => return c,
     };
+    // With -so standard output carries data only; no console framing.
+    let mut framing = (!cl.to_stdout).then(|| Framing::start(cl, ui));
     let input = match load_input(cl, ui) {
         Ok(b) => b,
         Err(c) => return c,
     };
-    let opened = match open_reader(&input, cl, ui) {
+    if let Some(f) = framing.as_mut() {
+        f.loaded(cl, ui, Action::Extracting, &input);
+    }
+    let display = framing.as_ref().map(|f| f.display.clone());
+    let opened = match open_reader(&input, cl, ui, display.as_deref()) {
         Ok(r) => r,
         Err(c) => return c,
     };
     let reader = &opened.reader;
     let entries = reader.entries();
     let chosen: Vec<usize> = (0..entries.len()).filter(|&i| sel.selects(&entries[i].path)).collect();
-    if cl.to_stdout {
+    let Some(framing) = framing.as_mut() else {
         return extract_to_stdout(cl, ui, &opened, &chosen);
-    }
+    };
+    framing.opened(ui, reader.as_ref(), &input);
     let mut plans = Vec::new();
     for g in split_groups(cl, entries, &chosen) {
         let mut plan = match plan_extraction(&g.planned, &PlanOptions::default()) {
@@ -1252,6 +1436,16 @@ fn run_extract(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
             Ok(r) => r,
             Err(f) => {
                 let name = f.index.map(|i| entries[i].path.as_slice()).unwrap_or(b"");
+                if opened.password_problem() == Some(PasswordProblem::Required) {
+                    return password_error(ui, &opened, name).unwrap_or(EXIT_FATAL);
+                }
+                match f.error {
+                    ExtractError::Source(e) if e != ReaderError::Allocation => {
+                        ui.raw_err(&entry_error(entry_problem(&opened, e), &console_name(name, false)));
+                        return framing.finish(ui, item_totals(reader.as_ref(), &chosen), 1, EXIT_FATAL);
+                    }
+                    _ => {}
+                }
                 if let Some(c) = password_error(ui, &opened, name) {
                     return c;
                 }
@@ -1277,7 +1471,7 @@ fn run_extract(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
             for it in &plan.items {
                 let skipped = report.skipped_existing.contains(&it.index) || report.skipped_symlinks.contains(&it.index);
                 let is_dir = matches!(it.kind, PlanKind::Dir);
-                if (skipped || is_dir) && cl.log_level < 2 {
+                if skipped && cl.log_level < 2 {
                     continue;
                 }
                 let tag = if skipped { "skipped " } else { "" };
@@ -1294,10 +1488,7 @@ fn run_extract(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         totals.dirs += report.dirs;
         totals.bytes = totals.bytes.saturating_add(report.bytes);
     }
-    if cl.log_level >= 1 && !cl.no_headers {
-        ui.out(&format!("Folders: {}\nFiles: {}\nSize: {}\n", totals.dirs, totals.files, totals.bytes));
-    }
-    code
+    framing.finish(ui, item_totals(reader.as_ref(), &chosen), 0, code)
 }
 
 // ---------------------------------------------------------------------------
@@ -1936,12 +2127,18 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         ui.err("warning: no files to add; archive not written");
         return EXIT_WARNING;
     }
+    if !cl.no_headers {
+        ui.out(&banner());
+    }
+    let count_kind = |k: FsKind| g.entries.iter().filter(|e| e.kind == k).count() as u64;
+    let (folders, files) = (count_kind(FsKind::Directory), g.entries.len() as u64 - count_kind(FsKind::Directory));
+    ui.out(&scanning_drive(folders, files, g.total_bytes));
+    ui.out(&creating_line(&os_display(archive)));
     let level = cl.level.unwrap_or(5);
     let bytes = match build_archive(target, level, threads, &sevenz, wm, &g, ui) {
         Ok(b) => b,
         Err(c) => return c,
     };
-    let mut where_ = String::new();
     if cl.to_stdout {
         let res = ui.con.stdout.write_all(&bytes).and_then(|_| ui.con.stdout.flush());
         match res {
@@ -1954,7 +2151,7 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         }
     } else if !cl.volumes.is_empty() {
         match write_volumes(archive, &bytes, &cl.volumes, cl.yes) {
-            Ok(n) => where_ = format!(" in {n} volumes"),
+            Ok(_) => {}
             Err(e) => {
                 ui.err(volume_msg(e));
                 return if e == VolumeError::Allocation { EXIT_MEMORY } else { EXIT_FATAL };
@@ -1970,22 +2167,15 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         ui.err(&format!("warning: cannot set archive time (-stl): {e}"));
         warned = true;
     }
+    let mut items = String::new();
     if cl.log_level >= 1 {
-        for e in &g.entries {
-            ui.out(&format!("+ {}\n", shown(&e.name)));
+        // -bb1 names the files, -bb2 also the folders (as 7-Zip).
+        for e in g.entries.iter().filter(|e| cl.log_level >= 2 || e.kind != FsKind::Directory) {
+            items.push_str(&format!("+ {}\n", shown(&e.name)));
         }
     }
-    if !cl.no_headers {
-        let files = g.entries.iter().filter(|e| e.kind == FsKind::File).count();
-        ui.out(&format!(
-            "Created {}{where_} ({} entries, {} files, {} bytes in, {} bytes out)\n",
-            archive.display(),
-            g.entries.len(),
-            files,
-            g.total_bytes,
-            bytes.len()
-        ));
-    }
+    let read = g.entries.iter().filter(|e| e.kind == FsKind::File && e.size > 0).count() as u64;
+    ui.out(&add_summary(folders, files, g.total_bytes, &items, read, bytes.len() as u64));
     if cl.delete_after && !delete_sources(&g.entries, ui) {
         warned = true;
     }

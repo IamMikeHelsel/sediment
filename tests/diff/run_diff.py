@@ -747,6 +747,9 @@ def failure_status(stderr, password):
     low = stderr.lower()
     if b"unsupported" in low:
         return "unsupported"
+    # 7-Zip console text for a file in no recognised format (no "[type]").
+    if b"\ncannot open the file as archive\n" in low:
+        return "unsupported"
     if password and (b"unknown switch" in low or b"too many arguments" in low):
         return "unsupported"  # no -p (password) switch yet
     return "mismatch"

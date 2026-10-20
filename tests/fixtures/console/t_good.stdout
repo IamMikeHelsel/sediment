@@ -1,0 +1,12 @@
+
+Testing archive: good.zip
+--
+Path = good.zip
+Type = zip
+Physical Size = 608
+
+Everything is Ok
+
+Files: 3
+Size:       2348
+Compressed: 608

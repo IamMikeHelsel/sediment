@@ -146,8 +146,8 @@ fn x_every_format_matches_reference_tree() {
 
         let o = run(&["t".as_ref(), fx(name).as_os_str()]);
         assert_eq!(o.status.code(), Some(0), "{name}");
-        let entries = want.len();
-        assert_eq!(text(&o.stdout), format!("OK\t{entries}\t{total}\n"), "{name}");
+        let s = text(&o.stdout);
+        assert!(s.contains("\nEverything is Ok\n\n") && s.contains(&format!("\nFiles: {n_files}\nSize:       {total}\n")), "{name}: {s}");
 
         let o = run(&["l".as_ref(), fx(name).as_os_str()]);
         assert_eq!(o.status.code(), Some(0), "{name}");
@@ -155,7 +155,7 @@ fn x_every_format_matches_reference_tree() {
         let o = run(&["l".as_ref(), "-ba".as_ref(), fx(name).as_os_str()]);
         let s = text(&o.stdout);
         let names: Vec<&str> = s.lines().map(|l| l.get(53..).unwrap().trim_end_matches('/')).collect();
-        assert_eq!(names.len(), entries, "{name}");
+        assert_eq!(names.len(), want.len(), "{name}");
         assert!(names.contains(&"docs/deep/nested/leaf.txt"), "{name}");
         assert!(n_files > 0);
     }
@@ -224,7 +224,7 @@ fn single_stream_files_extract_one_member() {
         let row = out.strip_suffix('\n').unwrap_or(&out);
         assert_eq!((row.get(26..38).map(str::trim), row.get(53..)), (Some(want[0]), Some(want[2])), "{arc}: {out}");
         let o = run(&["t".as_ref(), fx(arc).as_os_str()]);
-        assert_eq!(text(&o.stdout), format!("OK\t1\t{}\n", data.len()), "{arc}");
+        assert!(text(&o.stdout).ends_with(&format!("Everything is Ok\n\nFiles: 1\nSize:       {}\nCompressed: {}\n", data.len(), fs::metadata(fx(arc)).unwrap().len())), "{arc}: {}", text(&o.stdout));
     }
 }
 
@@ -286,7 +286,7 @@ fn add_reports_usage_and_unsupported() {
     let o = run(&["a".as_ref(), t.0.join("x.tar.bz2").as_os_str(), f.as_os_str()]);
     assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
     let o = run(&["t".as_ref(), t.0.join("x.tar.bz2").as_os_str()]);
-    assert_eq!(text(&o.stdout), "OK\t1\t1\n");
+    assert!(text(&o.stdout).contains("Everything is Ok\n\nFiles: 1\nSize:       1\n"), "{}", text(&o.stdout));
     // An unrecognised output extension is a command line error (7) and creates nothing.
     let o = run(&["a".as_ref(), t.0.join("x.rar").as_os_str(), f.as_os_str()]);
     assert_eq!(o.status.code(), Some(7));
@@ -401,7 +401,8 @@ fn corrupt_inputs_fail_cleanly() {
     for name in ["bad_crc.tar.gz", "truncated.tar.xz", "corrupt.bz2", "bad_checksum.tar"] {
         let o = run(&["t".as_ref(), fx(name).as_os_str()]);
         assert_eq!(o.status.code(), Some(2), "{name}: {}", text(&o.stderr));
-        assert!(o.stdout.is_empty(), "{name}");
+        assert!(!text(&o.stdout).contains("Everything is Ok"), "{name}");
+        assert!(text(&o.stderr).starts_with("ERROR: "), "{name}: {}", text(&o.stderr));
         let t = TempDir::new("bad");
         let o = run(&["x".as_ref(), out_arg(&t.0).as_ref(), fx(name).as_os_str()]);
         assert_eq!(o.status.code(), Some(2), "{name}: {}", text(&o.stderr));
@@ -423,9 +424,9 @@ fn corrupt_inputs_fail_cleanly() {
     fs::write(&unknown, &b).unwrap();
     let o = run(&["t".as_ref(), unknown.as_os_str()]);
     assert_eq!(o.status.code(), Some(2), "{}", text(&o.stderr));
-    assert!(text(&o.stderr).contains("unsupported compression method"), "{}", text(&o.stderr));
+    assert!(text(&o.stderr).contains("ERROR: Unsupported Method : "), "{}", text(&o.stderr));
     let o = run(&["t".as_ref(), fx("bad_crc.tar.gz").as_os_str()]);
-    assert_eq!(text(&o.stderr), "sediment: data error (checksum mismatch)\n");
+    assert_eq!(text(&o.stderr), "ERROR: CRC Failed : tree.tar\n");
     let o = run(&["l".as_ref(), fx("tree.dirs").as_os_str()]);
     assert_eq!(o.status.code(), Some(2));
     assert_eq!(text(&o.stderr), "sediment: unsupported archive format\n");

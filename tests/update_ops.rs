@@ -819,13 +819,14 @@ fn cli_update_delete_rename_zip() {
 
     let (c, out, err) = run(&d, &["u", "arch.zip", "tree"]);
     assert_eq!(c, 0, "{err}");
-    assert!(out.contains("4 added"), "{out}");
+    assert!(out.contains("Creating archive: arch.zip\n\nKeep old data in archive: 0 files\nAdd new data to archive: 4 files\n"), "{out}");
+    assert!(out.ends_with("Everything is Ok\n"), "{out}");
     let first = std::fs::read(d.join("arch.zip")).unwrap();
 
     // Nothing changed: archive not rewritten.
     let (c, out, _) = run(&d, &["u", "arch.zip", "tree"]);
     assert_eq!(c, 0);
-    assert!(out.contains("up to date"), "{out}");
+    assert!(out.contains("Updating archive: arch.zip\n\nKeep old data in archive: 4 files\nAdd new data to archive: 0 files\n"), "{out}");
     assert_eq!(std::fs::read(d.join("arch.zip")).unwrap(), first);
 
     // A newer file is replaced, a new file is added.
@@ -834,7 +835,7 @@ fn cli_update_delete_rename_zip() {
     std::fs::write(d.join("tree/c.txt"), b"gamma\n").unwrap();
     let (c, out, _) = run(&d, &["u", "-mx9", "arch.zip", "tree"]);
     assert_eq!(c, 0);
-    assert!(out.contains("1 added, 1 replaced, 3 unchanged"), "{out}");
+    assert!(out.contains("Keep old data in archive: 3 files\nAdd new data to archive: 2 files\n"), "{out}");
 
     let (c, _, _) = run(&d, &["d", "arch.zip", "*.log"]);
     assert_eq!(c, 0);
@@ -890,7 +891,7 @@ fn cli_update_tar_and_7z() {
         assert_eq!(c, 0, "{arch}: {err}");
         let (c, out, err) = run(&d, &["t", arch]);
         assert_eq!(c, 0, "{arch}: {err}");
-        assert!(out.starts_with("OK\t2\t6"), "{arch}: {out}");
+        assert!(out.contains("Everything is Ok\n\n") && out.contains("\nSize:       6\n"), "{arch}: {out}");
     }
     // A plain .gz cannot be updated.
     std::fs::write(d.join("one.gz"), std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/create/text.txt.gz")).unwrap()).unwrap();

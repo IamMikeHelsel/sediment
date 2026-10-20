@@ -295,7 +295,8 @@ fn ai_ax_list_test_and_listfiles() {
     assert!(s.contains("hello.txt") && s.contains("data/words.txt") && !s.contains("empty.txt"), "{s}");
     let o = run_in(&t.0, &["t", "-an", "-ai@want.lst", "-ax@skip.lst"]);
     assert_eq!(code(&o), 0);
-    assert_eq!(stdout(&o), "OK\t1\t17\n");
+    // 7-Zip console shape (console-output-parity): one archive tested, one member, 17 bytes.
+    assert!(stdout(&o).ends_with("Everything is Ok\n\nFiles: 1\nSize:       17\nCompressed: 151\n"), "{}", stdout(&o));
     // Nothing left after -ax: fatal, like a missing archive.
     let o = run_in(&t.0, &["t", "a1.zip", "-ax!*.zip"]);
     assert_eq!(code(&o), 2);
@@ -389,7 +390,7 @@ fn bt_prints_timing_and_accepted_switches() {
     let o = run_in(&t.0, &["t", "-bt", "-ad", "-bd", "-ssw", "tree.zip"]);
     assert_eq!(code(&o), 0);
     let s = stdout(&o);
-    assert!(s.starts_with("OK\t") && s.contains("Global  Time = "), "{s}");
+    assert!(s.contains("Everything is Ok") && s.contains("Global  Time = "), "{s}");
     let plain = stdout(&run_in(&t.0, &["t", "-ad", "-bd", "tree.zip"]));
     assert!(!plain.contains("Time ="));
     let o = run_in(&t.0, &["d", "-bt", "tree.zip", "hello.txt"]);

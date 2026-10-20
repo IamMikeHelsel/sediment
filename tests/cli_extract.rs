@@ -76,7 +76,8 @@ fn legacy_and_new_list_agree() {
     let lt = run(&["test", f]);
     let nt = run(&["t", f]);
     assert_eq!(stdout(&lt), "OK\t6\t1196\n");
-    assert_eq!(lt.stdout, nt.stdout);
+    // `t` prints 7-Zip's console shape over the same members.
+    assert!(stdout(&nt).ends_with("Everything is Ok\n\nFolders: 1\nFiles: 5\nSize:       1196\nCompressed: 684\n"), "{}", stdout(&nt));
     assert_eq!(nt.status.code(), Some(0));
 }
 
@@ -94,10 +95,11 @@ fn legacy_exit_codes_kept() {
 fn new_commands_fatal_is_2() {
     let o = run(&["t", fixture("badcrc.zip").to_str().unwrap()]);
     assert_eq!(o.status.code(), Some(2));
-    assert_eq!(stderr(&o), "sediment: data error: data.txt\n");
-    let o = run(&["x", fixture("notzip.bin").to_str().unwrap()]);
+    assert_eq!(stderr(&o), "ERROR: CRC Failed : data.txt\n");
+    let p = fixture("notzip.bin");
+    let o = run(&["x", p.to_str().unwrap()]);
     assert_eq!(o.status.code(), Some(2));
-    assert_eq!(stderr(&o), "sediment: unsupported archive format\n");
+    assert_eq!(stderr(&o), format!("ERROR: {}\nCannot open the file as archive\n\n", p.display()));
     assert_eq!(run(&["l", "/nonexistent/x.zip"]).status.code(), Some(2));
     // Command line errors use 7-Zip's exit code 7 (see cli_compat).
     assert_eq!(run(&["x"]).status.code(), Some(7));

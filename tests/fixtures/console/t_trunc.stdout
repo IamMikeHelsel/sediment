@@ -1,0 +1,18 @@
+
+Testing archive: trunc.zip
+--
+Path = trunc.zip
+Type = zip
+ERRORS:
+Unexpected end of archive
+Physical Size = 304
+Characteristics = Local
+
+
+Sub items Errors: 1
+
+Archives with Errors: 1
+
+Open Errors: 1
+
+Sub items Errors: 1

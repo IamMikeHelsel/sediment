@@ -1,0 +1,1 @@
+x -ba badcrc.zip -o{OUT} -y

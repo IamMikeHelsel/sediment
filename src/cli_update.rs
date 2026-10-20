@@ -35,6 +35,7 @@ use std::path::{Path, PathBuf};
 
 use crate::archive_edit::{EditSource, apply_plan, format_for_new, list_source, open_source};
 use crate::archive_name::escape_name;
+use crate::console_report::{banner, update_summary, updating_line};
 use crate::archive_update::{EditPlan, UpdateError, UpdateLimits, plan_delete, plan_rename, plan_update};
 use crate::fs_collect::{CollectError, CollectLimits, CollectOptions, WarningKind, collect, read_entry_data};
 
@@ -284,9 +285,32 @@ fn commit(path: &Path, src: &EditSource<'_>, plan: &EditPlan<'_>, level: u8, lim
     Ok(r.skipped.len())
 }
 
+/// Remove `-ba` (no banner) from `args`; true when it was present.
+fn take_ba(args: &[OsString]) -> (bool, Vec<OsString>) {
+    let mut ba = false;
+    let mut out = Vec::with_capacity(args.len());
+    let mut switches = true;
+    for a in args {
+        if switches && a == "--" {
+            switches = false;
+        } else if switches && a == "-ba" {
+            ba = true;
+            continue;
+        }
+        out.push(a.clone());
+    }
+    (ba, out)
+}
+
+fn archive_len(p: &Path) -> u64 {
+    std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+}
+
 /// Run `sediment d`. `args` are the arguments after the command.
 pub fn run_delete(args: &[OsString]) -> i32 {
-    const SYN: &str = "sediment d [-r] [-mx0..9] ARCHIVE PATTERN...";
+    const SYN: &str = "sediment d [-r] [-mx0..9] [-ba] ARCHIVE PATTERN...";
+    let (ba, args) = take_ba(args);
+    let args = &args[..];
     let a = match parse_edit_args(args, &["-r"]) {
         Ok(a) => a,
         Err(m) => return usage(&m, SYN),
@@ -311,19 +335,19 @@ pub fn run_delete(args: &[OsString]) -> i32 {
     };
     let plan = plan_delete(&existing, &pats, a.recursive);
     let n = plan.deleted();
-    if n == 0 {
-        let _ = writeln!(std::io::stdout().lock(), "No entries matched; {} unchanged", a.archive.display());
-        return 0;
+    let mut out = std::io::stdout().lock();
+    if !ba {
+        let _ = out.write_all(banner().as_bytes());
     }
-    if let Err(m) = commit(&a.archive, &src, &plan, a.level, &limits) {
+    let _ = out.write_all(updating_line(&a.archive.display().to_string(), true).as_bytes());
+    let _ = out.flush();
+    if n > 0
+        && let Err(m) = commit(&a.archive, &src, &plan, a.level, &limits)
+    {
         return fail(&m);
     }
-    let _ = writeln!(
-        std::io::stdout().lock(),
-        "Deleted {n} of {} entries from {}",
-        existing.len(),
-        a.archive.display()
-    );
+    let kept = existing.len().saturating_sub(n) as u64;
+    let _ = out.write_all(update_summary(Some(n as u64), kept, 0, archive_len(&a.archive)).as_bytes());
     0
 }
 
@@ -403,6 +427,8 @@ fn warn_msg(k: WarningKind) -> &'static str {
 /// Run `sediment u`. `args` are the arguments after the command.
 pub fn run_update(args: &[OsString]) -> i32 {
     const SYN: &str = "sediment u [-mx0..9] [-l] ARCHIVE PATH...";
+    let (ba, args) = take_ba(args);
+    let args = &args[..];
     let a = match parse_edit_args(args, &["-l"]) {
         Ok(a) => a,
         Err(m) => return usage(&m, SYN),
@@ -491,24 +517,21 @@ pub fn run_update(args: &[OsString]) -> i32 {
         Ok(p) => p,
         Err(e) => return fail(update_error_message(e)),
     };
-    let mut out = std::io::stdout().lock();
-    if plan.is_noop() && exists {
-        let _ = writeln!(out, "{} is up to date ({} unchanged)", a.archive.display(), summary.unchanged);
-        return if warned { EXIT_SKIPPED } else { 0 };
-    }
     if !exists && plan.is_noop() {
         return fail("nothing to add");
     }
-    if let Err(m) = commit(&a.archive, &src, &plan, a.level, &limits) {
+    let mut out = std::io::stdout().lock();
+    if !ba {
+        let _ = out.write_all(banner().as_bytes());
+    }
+    let _ = out.write_all(updating_line(&a.archive.display().to_string(), exists).as_bytes());
+    let _ = out.flush();
+    if !plan.is_noop()
+        && let Err(m) = commit(&a.archive, &src, &plan, a.level, &limits)
+    {
         return fail(&m);
     }
-    let _ = writeln!(
-        out,
-        "Updated {}: {} added, {} replaced, {} unchanged",
-        a.archive.display(),
-        summary.added,
-        summary.replaced,
-        summary.unchanged
-    );
+    let added = (summary.added + summary.replaced) as u64;
+    let _ = out.write_all(update_summary(None, existing.len().saturating_sub(summary.replaced) as u64, added, archive_len(&a.archive)).as_bytes());
     if warned { EXIT_SKIPPED } else { 0 }
 }

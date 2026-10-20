@@ -131,7 +131,7 @@ fn si_tar_gz_is_detected_as_tar() {
     assert!(s.contains("  hello.txt\n") && s.contains("  payload.bin\n"), "{s}");
     let o = run_in(&["t", "-si"], &whole, &[]);
     ok(&o);
-    assert_eq!(text(&o.stdout), "OK\t2\t16015\n");
+    assert!(text(&o.stdout).contains("Everything is Ok\n\nFiles: 2\nSize:       16015\n"), "{}", text(&o.stdout));
     let o = run_in(&["x", "-si", "-so"], &whole, &[]);
     ok(&o);
     assert_eq!(o.stdout, pair_concat());
@@ -265,7 +265,7 @@ fn split_tar_gz_reads_transparently() {
     assert!(text(&o.stdout).contains("  payload.bin\n"));
     let o = run(&["t".as_ref(), first.as_os_str()]);
     ok(&o);
-    assert_eq!(text(&o.stdout), "OK\t2\t16015\n");
+    assert!(text(&o.stdout).contains("Everything is Ok\n\nFiles: 2\nSize:       16015\n"), "{}", text(&o.stdout));
     let o = run(&["x".as_ref(), "-so".as_ref(), first.as_os_str()]);
     ok(&o);
     assert_eq!(o.stdout, pair_concat());
@@ -330,7 +330,7 @@ fn create_volumes_and_read_back() {
         let arc = t.join(name);
         let o = run(&["a".as_ref(), format!("-v{vsize}b").as_ref(), arc.as_os_str(), src.as_os_str()]);
         ok(&o);
-        assert!(text(&o.stdout).contains(" volumes "), "{}", text(&o.stdout));
+        assert!(text(&o.stdout).ends_with("Everything is Ok\n"), "{}", text(&o.stdout));
         assert!(!arc.exists(), "unsplit archive left behind");
         let vols = volumes_of(&t.0, name);
         assert!(vols.len() >= 2, "{name}: {vols:?}");

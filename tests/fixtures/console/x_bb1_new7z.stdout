@@ -1,0 +1,20 @@
+
+Extracting archive: new.7z
+--
+Path = new.7z
+Type = 7z
+Physical Size = 196
+Headers Size = 171
+Method = LZMA2:12
+Solid = +
+Blocks = 1
+
+- sub/
+- a.txt
+- sub/b.txt
+Everything is Ok
+
+Folders: 1
+Files: 2
+Size:       306
+Compressed: 196
