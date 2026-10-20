@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sediment — cover</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/hack-font@3.3.0/build/web/hack-subset.css">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../sediment.css">
+<link rel="stylesheet" href="samples.css">
+<style>
+  /* 960 × 288. Blocks: tape (J-card), signal (one orange stripe), ink (the shell) with the StrataMark cut out in surface. */
+  .cover { position: relative; width: 960px; height: 288px; overflow: hidden; border: var(--stroke-hair) solid var(--line); border-radius: var(--radius-window); }
+  .cover .art { position: absolute; top: 0; left: 480px; overflow: hidden; }
+  .cover .tape { fill: var(--tape); } .cover .signal { fill: var(--signal); } .cover .shell { fill: var(--ink); }
+  .cover .strata { fill: none; stroke: var(--surface); stroke-width: 8.32; stroke-linejoin: miter; }
+  .cover .words { position: absolute; left: 32px; bottom: 32px; max-width: 440px; }
+  .cover .name { margin: 0; font: 300 88px/.92 var(--font-sans); letter-spacing: -.01em; }
+  .cover .tag { margin: var(--space-8) 0 0 4px; font-size: 14px; line-height: 20px; color: var(--muted); }
+</style>
+</head>
+<body data-theme="light">
+<div class="page-head"><span class="sd-util">SEDIMENT / DESIGN / COVER</span><a class="sd-util sd-push" href="index.html">ALL SAMPLES</a></div>
+<div class="pair">
+<figure>
+  <div class="cover theme" data-theme="light">
+    <svg class="art" viewBox="0 0 480 288" width="480" height="288" aria-hidden="true">
+      <rect class="tape" x="96" y="32" width="160" height="152" rx="4"/>
+      <rect class="signal" x="96" y="200" width="160" height="56" rx="4"/>
+      <rect class="shell" x="272" y="32" width="224" height="224" rx="4"/>
+      <polyline class="strata" points="322.24,108.16 376,128.64 429.76,108.16"/>
+      <polyline class="strata" points="322.24,137.6 376,158.08 429.76,137.6"/>
+      <polyline class="strata" points="322.24,167.04 376,187.52 429.76,167.04"/>
+    </svg>
+    <div class="words"><h1 class="name">sediment</h1><p class="tag">Less space. Everything in place.</p></div>
+  </div>
+  <figcaption class="sd-util">LIGHT / 960 × 288</figcaption>
+</figure>
+</div>
+<div class="pair">
+<figure>
+  <div class="cover theme" data-theme="dark">
+    <svg class="art" viewBox="0 0 480 288" width="480" height="288" aria-hidden="true">
+      <rect class="tape" x="96" y="32" width="160" height="152" rx="4"/>
+      <rect class="signal" x="96" y="200" width="160" height="56" rx="4"/>
+      <rect class="shell" x="272" y="32" width="224" height="224" rx="4"/>
+      <polyline class="strata" points="322.24,108.16 376,128.64 429.76,108.16"/>
+      <polyline class="strata" points="322.24,137.6 376,158.08 429.76,137.6"/>
+      <polyline class="strata" points="322.24,167.04 376,187.52 429.76,167.04"/>
+    </svg>
+    <div class="words"><h1 class="name">sediment</h1><p class="tag">Less space. Everything in place.</p></div>
+  </div>
+  <figcaption class="sd-util">DARK / 960 × 288</figcaption>
+</figure>
+</div>
+</body>
+</html>

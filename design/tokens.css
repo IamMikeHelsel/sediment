@@ -1,0 +1,60 @@
+/* sediment tokens — mirrors tokens.json; change both together. */
+/* Light is the default. Dark applies with data-theme="dark" on any ancestor, or by system preference unless data-theme="light" is set. */
+
+:root, [data-theme="light"] {
+  --surface: #e2e2e0;
+  --field: #d6d6d4;
+  --paper: #f7f6f0;
+  --tape: #d9cfbc;
+  --line: #bdbdbb;
+  --ink: #161616;
+  --muted: #535351;
+  --signal: #ff4f1a;
+  --on-signal: #161616;
+  --space-2: 2px;
+  --space-6: 6px;
+  --space-7: 7px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --radius-control: 3px;
+  --radius-window: 4px;
+  --radius-icon: 22%;
+  --control-height: 28px;
+  --row-height: 25px;
+  --mark-header: 23px;
+  --status-dot: 5px;
+  --stroke-hair: 1px;
+  --font-sans: Ubuntu, system-ui, sans-serif;
+  --font-mono: Hack, ui-monospace, Menlo, monospace;
+}
+
+[data-theme="dark"] {
+  --surface: #181818;
+  --field: #292928;
+  --paper: #222221;
+  --tape: #4a4336;
+  --line: #454543;
+  --ink: #f1f1ef;
+  --muted: #b5b5b0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: #181818;
+    --field: #292928;
+    --paper: #222221;
+    --tape: #4a4336;
+    --line: #454543;
+    --ink: #f1f1ef;
+    --muted: #b5b5b0;
+  }
+}
+
+.type-display { font: 300 30px/35px var(--font-sans); }
+.type-title { font: 300 21px/25px var(--font-sans); }
+.type-wordmark { font: 300 20px/24px var(--font-sans); }
+.type-body { font: 300 13px/18px var(--font-sans); }
+.type-control { font: 300 12px/16px var(--font-sans); }
+.type-utility { font: 400 10px/14px var(--font-mono); text-transform: uppercase; }

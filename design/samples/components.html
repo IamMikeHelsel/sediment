@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sediment — components</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/hack-font@3.3.0/build/web/hack-subset.css">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../sediment.css">
+<link rel="stylesheet" href="samples.css">
+</head>
+<body data-theme="light">
+<div class="page-head"><span class="sd-util">SEDIMENT / DESIGN / COMPONENTS</span><a class="sd-util sd-push" href="index.html">ALL SAMPLES</a></div>
+<div class="pair">
+<figure>
+  <div class="theme" data-theme="light" style="display:grid;grid-template-columns:repeat(8,80px);gap:var(--space-8);padding:24px;border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-window)"><div style="display:grid;gap:4px"><div style="height:56px;background:var(--surface);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">SURFACE</span><span class="sd-util keep">ground</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--field);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">FIELD</span><span class="sd-util keep">wells</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--paper);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">PAPER</span><span class="sd-util keep">label</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--tape);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">TAPE</span><span class="sd-util keep">j-card</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--line);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">LINE</span><span class="sd-util keep">hairline</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--muted);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">MUTED</span><span class="sd-util keep">metadata</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--ink);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">INK</span><span class="sd-util keep">text</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--signal);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">SIGNAL</span><span class="sd-util keep">the one orange</span></div></div>
+  <figcaption class="sd-util">LIGHT / COLOUR</figcaption>
+</figure>
+<figure>
+  <div class="theme" data-theme="dark" style="display:grid;grid-template-columns:repeat(8,80px);gap:var(--space-8);padding:24px;border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-window)"><div style="display:grid;gap:4px"><div style="height:56px;background:var(--surface);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">SURFACE</span><span class="sd-util keep">ground</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--field);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">FIELD</span><span class="sd-util keep">wells</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--paper);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">PAPER</span><span class="sd-util keep">label</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--tape);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">TAPE</span><span class="sd-util keep">j-card</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--line);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">LINE</span><span class="sd-util keep">hairline</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--muted);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">MUTED</span><span class="sd-util keep">metadata</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--ink);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">INK</span><span class="sd-util keep">text</span></div><div style="display:grid;gap:4px"><div style="height:56px;background:var(--signal);border:var(--stroke-hair) solid var(--line);border-radius:var(--radius-control)"></div><span class="sd-util">SIGNAL</span><span class="sd-util keep">the one orange</span></div></div>
+  <figcaption class="sd-util">DARK / COLOUR</figcaption>
+</figure>
+</div>
+<div class="pair">
+<figure>
+  <div class="grid theme" data-theme="light">
+    <span class="sd-util">STRATAMARK</span><div><div class="sd-row"><svg class="sd-mark" viewBox="0 0 100 100" aria-hidden="true"><polyline points="8,22 50,38 92,22"/><polyline points="8,45 50,61 92,45"/><polyline points="8,68 50,84 92,68"/></svg><span class="sd-wordmark">sediment</span></div></div>
+    <span class="sd-util">BUTTON</span><div><div class="sd-row"><button class="sd-btn primary">Extract all…</button><button class="sd-btn">Test archive</button><button class="sd-btn" disabled>Cancel</button><button class="sd-btn small">Details</button></div></div>
+    <span class="sd-util">UTILITY LABEL</span><div><span class="sd-util">ZIP / 4 ENTRIES / 18.1 MB UNPACKED</span></div>
+    <span class="sd-util">FILTER FIELD</span><div><input class="sd-field" placeholder="Filter files…" aria-label="Filter files"></div>
+    <span class="sd-util">APPEARANCE</span><div><span class="sd-select sd-util" tabindex="0">SYSTEM</span></div>
+    <span class="sd-util">STATUS / IDLE</span><div><div class="sd-status"><span class="sd-dot"></span><span class="msg sd-util keep">Ready when you are.</span><button class="sd-btn small">Details</button></div></div>
+    <span class="sd-util">STATUS / ERROR</span><div><div class="sd-status"><span class="sd-dot error"></span><span class="msg sd-util keep">ERROR / checksum mismatch in Field recordings/02 — Night drive.wav</span><button class="sd-btn small">Details</button></div></div>
+    <span class="sd-util">TAPE LABEL</span><div><div class="sd-tape"><span class="side">SIDE A</span><div class="label"><b>Field recordings.zip</b><i>ZIP / 4 ENTRIES / 12.2 MB</i></div></div></div>
+  </div>
+  <figcaption class="sd-util">LIGHT / COMPONENTS</figcaption>
+</figure>
+<figure>
+  <div class="grid theme" data-theme="dark">
+    <span class="sd-util">STRATAMARK</span><div><div class="sd-row"><svg class="sd-mark" viewBox="0 0 100 100" aria-hidden="true"><polyline points="8,22 50,38 92,22"/><polyline points="8,45 50,61 92,45"/><polyline points="8,68 50,84 92,68"/></svg><span class="sd-wordmark">sediment</span></div></div>
+    <span class="sd-util">BUTTON</span><div><div class="sd-row"><button class="sd-btn primary">Extract all…</button><button class="sd-btn">Test archive</button><button class="sd-btn" disabled>Cancel</button><button class="sd-btn small">Details</button></div></div>
+    <span class="sd-util">UTILITY LABEL</span><div><span class="sd-util">ZIP / 4 ENTRIES / 18.1 MB UNPACKED</span></div>
+    <span class="sd-util">FILTER FIELD</span><div><input class="sd-field" placeholder="Filter files…" aria-label="Filter files"></div>
+    <span class="sd-util">APPEARANCE</span><div><span class="sd-select sd-util" tabindex="0">SYSTEM</span></div>
+    <span class="sd-util">STATUS / IDLE</span><div><div class="sd-status"><span class="sd-dot"></span><span class="msg sd-util keep">Ready when you are.</span><button class="sd-btn small">Details</button></div></div>
+    <span class="sd-util">STATUS / ERROR</span><div><div class="sd-status"><span class="sd-dot error"></span><span class="msg sd-util keep">ERROR / checksum mismatch in Field recordings/02 — Night drive.wav</span><button class="sd-btn small">Details</button></div></div>
+    <span class="sd-util">TAPE LABEL</span><div><div class="sd-tape"><span class="side">SIDE A</span><div class="label"><b>Field recordings.zip</b><i>ZIP / 4 ENTRIES / 12.2 MB</i></div></div></div>
+  </div>
+  <figcaption class="sd-util">DARK / COMPONENTS</figcaption>
+</figure>
+</div>
+</body>
+</html>
