@@ -1,6 +1,7 @@
 //! Sediment archive engine. Capability tickets; no parity claim.
 pub mod adler32;
 pub mod aes;
+pub mod android_sparse;
 pub mod ar_archive;
 pub mod ar_read;
 pub mod archive_detect;
