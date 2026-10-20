@@ -170,3 +170,4 @@ pub mod uefi_section_decode;
 pub mod bzip2_block_scan;
 pub mod method_switch_parse;
 pub mod tar_sparse_map;
+pub mod iso_eltorito;
