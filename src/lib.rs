@@ -142,3 +142,4 @@ pub mod zlib_wrapper;
 pub mod zstd_decode;
 pub mod elf_sections;
 pub mod mbr_gpt;
+pub mod base64_codec;
