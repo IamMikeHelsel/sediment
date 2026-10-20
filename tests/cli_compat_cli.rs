@@ -220,16 +220,20 @@ fn test_command_selection_and_output() {
     let zip = wire("tree.zip");
     let o = run(&argv!["t", "-bb1", &zip, "*.txt"]);
     assert_eq!(code(&o), 0);
-    assert_eq!(text(&o.stdout), "T empty.txt\nT hello.txt\nOK\t2\t17\n");
+    assert!(text(&o.stdout).ends_with("\nT empty.txt\nT hello.txt\nEverything is Ok\n\nFiles: 2\nSize:       17\nCompressed: 3393\n"), "{}", text(&o.stdout));
     let o = run(&argv!["t", "-ba", &zip]);
-    assert_eq!((code(&o), o.stdout.len()), (0, 0));
+    assert_eq!(code(&o), 0);
+    assert!(text(&o.stdout).starts_with(&format!("\nTesting archive: {}\n--\n", zip.display())), "{}", text(&o.stdout));
     let o = run(&argv!["t", &zip]);
-    assert_eq!(text(&o.stdout), "OK\t14\t12714\n");
+    let s = text(&o.stdout);
+    assert!(s.contains("\nScanning the drive for archives:\n1 file, 3393 bytes (4 KiB)\n"), "{s}");
+    assert!(s.ends_with("Everything is Ok\n\nFolders: 5\nFiles: 9\nSize:       12714\nCompressed: 3393\n"), "{s}");
     // A bad member is reported even when others follow; nothing claims OK.
     let o = run(&argv!["t", root().join("tests/fixtures/extract/badcrc.zip")]);
     assert_eq!(code(&o), 2);
-    assert_eq!(text(&o.stderr), "sediment: data error: data.txt\n");
-    assert!(o.stdout.is_empty());
+    assert_eq!(text(&o.stderr), "ERROR: CRC Failed : data.txt\n");
+    let s = text(&o.stdout);
+    assert!(!s.contains("Everything is Ok") && s.ends_with("\nSub items Errors: 1\n\nArchives with Errors: 1\n\nSub items Errors: 1\n"), "{s}");
 }
 
 // ---------------------------------------------------------------------------
@@ -382,13 +386,14 @@ fn extract_with_selection() {
 fn extract_log_levels() {
     let t = TempDir::new("bb");
     let o = run(&argv!["x", wire("tree.zip"), out_arg(&t.path("a")), "-bb1", "data"]);
-    assert_eq!(text(&o.stdout), "- data/prog.bin\n- data/random.bin\n- data/words.txt\nFolders: 1\nFiles: 3\nSize: 8742\n");
+    let s = text(&o.stdout);
+    assert!(s.contains("- data/\n- data/prog.bin\n- data/random.bin\n- data/words.txt\nEverything is Ok\n\nFolders: 1\nFiles: 3\nSize:       8742\n"), "{s}");
     let o = run(&argv!["x", wire("tree.zip"), out_arg(&t.path("b")), "-bb2", "-ba", "data"]);
-    assert_eq!(text(&o.stdout), "- data/\n- data/prog.bin\n- data/random.bin\n- data/words.txt\n");
+    assert!(text(&o.stdout).contains("\n\n- data/\n- data/prog.bin\n- data/random.bin\n- data/words.txt\nEverything is Ok\n"), "{}", text(&o.stdout));
     let o = run(&argv!["x", wire("tree.zip"), out_arg(&t.path("b")), "-bb2", "-aos", "-ba", "data/prog.bin"]);
-    assert_eq!(text(&o.stdout), "- skipped data/prog.bin\n");
+    assert!(text(&o.stdout).contains("\n- skipped data/prog.bin\nEverything is Ok\n"), "{}", text(&o.stdout));
     let o = run(&argv!["x", wire("tree.zip"), out_arg(&t.path("c")), "data"]);
-    assert!(o.stdout.is_empty());
+    assert!(!text(&o.stdout).contains("- data/"), "-bb0 names no members");
 }
 
 #[test]
@@ -690,17 +695,18 @@ fn add_full_paths_and_output_switches() {
     let arc = t.path("full.tar");
     let o = run(&argv!["a", "-spf", "-ba", &arc, src.join("hello.txt"), src.join("data/../docs/deep")]);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
-    assert!(o.stdout.is_empty(), "-ba hides the summary");
+    let s = text(&o.stdout);
+    assert!(s.starts_with("Scanning the drive:\n") && s.ends_with("Everything is Ok\n"), "-ba hides the banner only: {s}");
     let base = src.display().to_string().trim_start_matches('/').to_string();
     let want: Vec<String> = ["hello.txt", "docs/deep", "docs/deep/nested", "docs/deep/nested/leaf.txt", LONG]
         .iter()
         .map(|n| format!("{base}/{n}"))
         .collect();
     assert_eq!(listing(&arc), sorted(want));
-    // -bb1 lists added names; the summary line follows.
+    // -bb1 lists added names between "Add new data" and the summary.
     let o = run_in(Some(&src), &argv!["a", "-bb1", t.path("bb.zip"), "*.txt"]);
     let s = text(&o.stdout);
-    assert!(s.starts_with("+ empty.txt\n+ hello.txt\nCreated "), "{s}");
+    assert!(s.contains("\n\n+ empty.txt\n+ hello.txt\n\nFiles read from disk: 1\n"), "{s}");
 }
 
 #[test]
@@ -859,7 +865,8 @@ fn so_and_si_with_selection() {
     let o = run_stdin(None, &argv!["l", "-si", "-ba", "hello.txt", "data/*.bin"], &bytes);
     assert_eq!(sorted(names(&o)), strs(&["data/prog.bin", "data/random.bin", "hello.txt"]));
     let o = run_stdin(None, &argv!["t", "-si", "-ba"], &bytes);
-    assert_eq!((code(&o), o.stdout.len()), (0, 0));
+    assert_eq!(code(&o), 0);
+    assert!(text(&o.stdout).starts_with("\nTesting archive: stdin\n--\nPath = stdin\nType = zip\n"), "{}", text(&o.stdout));
     let o = run_stdin(None, &argv!["l", "-si", "-slt", "-ba", "-tzip", "hello.txt"], &bytes);
     assert!(text(&o.stdout).starts_with("Path = hello.txt\nFolder = -\n"), "{}", text(&o.stdout));
     let t = TempDir::new("si-x");
@@ -875,7 +882,7 @@ fn add_to_stdout_and_volumes() {
     // -so: the archive goes to stdout, the summary to stderr; the name only picks the format.
     let o = run_stdin(Some(&src), &argv!["a", "-so", "out.tar", "-r", "*.txt"], b"");
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
-    assert!(text(&o.stderr).starts_with("Created out.tar ("), "{}", text(&o.stderr));
+    assert!(text(&o.stderr).contains("Creating archive: out.tar\n") && text(&o.stderr).ends_with("Everything is Ok\n"), "{}", text(&o.stderr));
     assert!(!src.join("out.tar").exists());
     let l = run_stdin(None, &argv!["l", "-si", "-ba"], &o.stdout);
     assert_eq!(sorted(names(&l)), strs(&["data/words.txt", CAFE, "docs/deep/nested/leaf.txt", LONG, "empty.txt", "hello.txt"]));
@@ -889,7 +896,7 @@ fn add_to_stdout_and_volumes() {
     let arc = t.path("v.zip");
     let o = run_in(Some(&src), &argv!["a", "-v2k", &arc, "*", "-xr!*.bin"]);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
-    assert!(text(&o.stdout).contains(" in ") && text(&o.stdout).contains(" volumes ("), "{}", text(&o.stdout));
+    assert!(text(&o.stdout).ends_with("Everything is Ok\n"), "{}", text(&o.stdout));
     assert!(!arc.exists() && t.path("v.zip.001").exists() && t.path("v.zip.002").exists());
     let first = t.path("v.zip.001");
     assert!(!listing(&first).iter().any(|n| n.ends_with(".bin")));

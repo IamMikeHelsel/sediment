@@ -67,7 +67,7 @@ fn test_and_list_with_password() {
     for f in ALL {
         let o = run(&["t", "-psecret", &fixture(f)]);
         assert_eq!(o.status.code(), Some(0), "{f}: {}", stderr(&o));
-        assert_eq!(stdout(&o), "OK\t6\t3677\n", "{f}");
+        assert!(stdout(&o).contains("\nEverything is Ok\n\n") && stdout(&o).contains("\nSize:       3677\n"), "{f}: {}", stdout(&o));
         let o = run(&["l", "-psecret", &fixture(f)]);
         assert_eq!(o.status.code(), Some(0), "{f}");
         assert!(stdout(&o).contains("  b.bin\n"), "{f}");

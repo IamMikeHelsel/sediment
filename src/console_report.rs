@@ -125,6 +125,8 @@ pub enum EntryProblem {
     WrongPassword,
     /// 7z: decoding encrypted data failed.
     WrongPasswordEncrypted,
+    /// The compressed stream ends early.
+    UnexpectedEnd,
 }
 
 /// `ERROR: CRC Failed : NAME` and friends (standard error).
@@ -135,6 +137,7 @@ pub fn entry_error(problem: EntryProblem, name: &str) -> String {
         EntryProblem::UnsupportedMethod => "Unsupported Method",
         EntryProblem::WrongPassword => "Wrong password",
         EntryProblem::WrongPasswordEncrypted => "Data Error in encrypted file. Wrong password?",
+        EntryProblem::UnexpectedEnd => "Unexpected end of data",
     };
     format!("ERROR: {what} : {name}\n")
 }

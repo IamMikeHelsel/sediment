@@ -890,7 +890,7 @@ fn cli_update_tar_and_7z() {
         assert_eq!(c, 0, "{arch}: {err}");
         let (c, out, err) = run(&d, &["t", arch]);
         assert_eq!(c, 0, "{arch}: {err}");
-        assert!(out.starts_with("OK\t2\t6"), "{arch}: {out}");
+        assert!(out.contains("Everything is Ok\n\n") && out.contains("\nSize:       6\n"), "{arch}: {out}");
     }
     // A plain .gz cannot be updated.
     std::fs::write(d.join("one.gz"), std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/create/text.txt.gz")).unwrap()).unwrap();

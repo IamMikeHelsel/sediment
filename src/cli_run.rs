@@ -66,7 +66,7 @@ use crate::console_report::{
     Action, EntryProblem, OpenProblem, Totals as ConsoleTotals, action_line, add_summary, archive_block, creating_line, archive_extent, banner,
     entry_error, error_summary, ok_summary, open_failure, scanning_archives_found, scanning_archives_head, scanning_drive,
 };
-use crate::cli_slt::{archive_header, format_table, format_table_row, generic_entry, sevenz_details, table_rows};
+use crate::cli_slt::{slt_path, archive_header, format_table, format_table_row, generic_entry, sevenz_details, table_rows};
 use crate::cli_seam::wildcard::{match_name, match_path};
 use crate::compress_wrap::{Compression, WrapError, compress, compress_bound_for};
 use crate::extract_fs::{ExtractError, ExtractOptions, OverwritePolicy, SymlinkPolicy, execute_plan};
@@ -225,6 +225,16 @@ impl Ui<'_, '_> {
             self.write_failed = true;
         }
     }
+}
+
+/// Member name as 7-Zip prints it: UTF-8 as is (escaped only when not
+/// printable), directories with a trailing slash.
+fn console_name(name: &[u8], is_dir: bool) -> String {
+    let mut s = slt_path(name);
+    if is_dir {
+        s.push('/');
+    }
+    s
 }
 
 fn shown(name: &[u8]) -> String {
@@ -549,11 +559,28 @@ fn detected_name(d: Detected) -> Option<&'static str> {
 /// Report an archive that did not open. In console mode (`t`/`x`/`e`,
 /// `console` = the displayed name) the 7-Zip "Can't open as archive" block
 /// is printed; otherwise the plain `sediment:` message.
-fn open_failed(ui: &mut Ui<'_, '_>, console: Option<&str>, buf: &[u8], e: ReaderError) -> i32 {
+fn open_failed(ui: &mut Ui<'_, '_>, console: Option<&str>, input: &Input, buf: &[u8], e: ReaderError) -> i32 {
     let Some(display) = console else {
         return reader_error(ui, e);
     };
     let detected = detected_name(detect_format(buf));
+    // A single compressed stream opens in 7-Zip even when its data is bad;
+    // the damage is reported against the one member.
+    if let Some(t @ ("gzip" | "bzip2" | "xz")) = detected
+        && e != ReaderError::Allocation
+    {
+        let problem = match e {
+            ReaderError::CrcMismatch => EntryProblem::CrcFailed,
+            ReaderError::Truncated => EntryProblem::UnexpectedEnd,
+            _ => EntryProblem::DataError,
+        };
+        ui.out(&format!("--\nPath = {display}\nType = {t}\n\n"));
+        let gz_name = if t == "gzip" { parse_gzip_header(buf, 4096).ok().and_then(|h| h.name.as_deref().and_then(gzip_member_name)) } else { None };
+        let member = gz_name.unwrap_or_else(|| stream_member_name(&input.name));
+        ui.raw_err(&entry_error(problem, &console_name(&member, false)));
+        ui.out(&error_summary(1));
+        return EXIT_FATAL;
+    }
     // zip/7z whose recorded end lies beyond the file were cut short.
     let cut = matches!(detected, Some("zip" | "7z")) && archive_extent(detected.unwrap_or(""), buf).is_none();
     let problem = match e {
@@ -579,7 +606,7 @@ fn open_reader<'b>(input: &'b Input, cl: &CommandLine, ui: &mut Ui<'_, '_>, cons
         if matches!(t, ArchiveType::Gzip | ArchiveType::Bzip2 | ArchiveType::Xz) {
             return match open_stream(buf, t, &input.name, limits) {
                 Ok(r) => Ok(OpenedArchive::plain(Box::new(r))),
-                Err(e) => Err(open_failed(ui, console, buf, e)),
+                Err(e) => Err(open_failed(ui, console, input, buf, e)),
             };
         }
     }
@@ -616,7 +643,7 @@ fn open_reader<'b>(input: &'b Input, cl: &CommandLine, ui: &mut Ui<'_, '_>, cons
             }
             return Err(EXIT_FATAL);
         }
-        Err(OpenCryptError::Reader(e)) => return Err(open_failed(ui, console, buf, e)),
+        Err(OpenCryptError::Reader(e)) => return Err(open_failed(ui, console, input, buf, e)),
     };
     let expected = match cl.archive_type {
         Some(ArchiveType::Lzh) => Some(ArchiveFormat::Lzh),
@@ -832,8 +859,7 @@ fn test(cl: &CommandLine, ui: &mut Ui<'_, '_>, opened: &OpenedArchive<'_>, chose
     for &i in chosen {
         let e = &reader.entries()[i];
         if cl.log_level >= 1 {
-            let slash = if matches!(e.kind, EntryKind::Dir) && e.path.last() != Some(&b'/') { "/" } else { "" };
-            ui.out(&format!("T {}{slash}\n", shown(&e.path)));
+            ui.out(&format!("T {}\n", console_name(&e.path, matches!(e.kind, EntryKind::Dir))));
         }
         let problem = match reader.read(i) {
             Ok(d) if !matches!(e.kind, EntryKind::File) || d.len() as u64 == e.size => continue,
@@ -850,7 +876,7 @@ fn test(cl: &CommandLine, ui: &mut Ui<'_, '_>, opened: &OpenedArchive<'_>, chose
             }
             Err(err) => entry_problem(opened, err),
         };
-        ui.raw_err(&entry_error(problem, &shown(&e.path)));
+        ui.raw_err(&entry_error(problem, &console_name(&e.path, false)));
         errors += 1;
     }
     framing.finish(ui, item_totals(reader, chosen), errors, code)
@@ -1207,7 +1233,7 @@ fn run_extract(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
                 }
                 match f.error {
                     ExtractError::Source(e) if e != ReaderError::Allocation => {
-                        ui.raw_err(&entry_error(entry_problem(&opened, e), &shown(name)));
+                        ui.raw_err(&entry_error(entry_problem(&opened, e), &console_name(name, false)));
                         return framing.finish(ui, item_totals(reader.as_ref(), &chosen), 1, EXIT_FATAL);
                     }
                     _ => {}
