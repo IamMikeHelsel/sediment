@@ -127,3 +127,30 @@ fn corrupt_fixtures_exit_2_without_panic() {
         }
     }
 }
+
+/// `d` and `u` print the 7-Zip update shape (member counts, archive size,
+/// "Everything is Ok"); `-ba` drops the banner.
+#[test]
+fn delete_and_update_shape() {
+    let t = scratch();
+    let arc = t.join("x.zip");
+    fs::copy(dir().join("good.zip"), &arc).unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_sediment")).args(["d", "-ba", "x.zip", "empty"]).current_dir(&t).output().unwrap();
+    assert_eq!(o.status.code(), Some(0));
+    let len = fs::metadata(&arc).unwrap().len();
+    assert_eq!(
+        String::from_utf8(o.stdout).unwrap(),
+        format!(
+            "Updating archive: x.zip\n\nDelete data from archive: 1 file\nKeep old data in archive: 2 files\n\
+             Add new data to archive: 0 files\n\n\nArchive size: {len} bytes (1 KiB)\nEverything is Ok\n"
+        )
+    );
+    fs::write(t.join("new.txt"), b"new\n").unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_sediment")).args(["u", "x.zip", "new.txt"]).current_dir(&t).output().unwrap();
+    assert_eq!(o.status.code(), Some(0));
+    let s = String::from_utf8(o.stdout).unwrap();
+    assert!(s.starts_with("\nSediment "), "{s}");
+    assert!(s.contains("\nUpdating archive: x.zip\n\nKeep old data in archive: 2 files\nAdd new data to archive: 1 file\n"), "{s}");
+    assert!(s.ends_with("Everything is Ok\n"), "{s}");
+    let _ = fs::remove_dir_all(&t);
+}

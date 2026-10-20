@@ -272,6 +272,28 @@ pub fn add_summary(folders: u64, files: u64, bytes: u64, items: &str, read_from_
     )
 }
 
+/// `u`/`d`: `Updating archive: NAME` (or `Creating archive:` for a new
+/// one), followed by a blank line.
+pub fn updating_line(display: &str, exists: bool) -> String {
+    format!("{} archive: {display}\n\n", if exists { "Updating" } else { "Creating" })
+}
+
+/// `u`/`d`: member counts and the result. `deleted` is printed for `d`
+/// only. Member sizes are not reported (7-Zip adds them after the counts).
+pub fn update_summary(deleted: Option<u64>, kept: u64, added: u64, archive_size: u64) -> String {
+    let mut s = String::new();
+    if let Some(d) = deleted {
+        s.push_str(&format!("Delete data from archive: {}\n", count(d, "file", "files")));
+    }
+    s.push_str(&format!(
+        "Keep old data in archive: {}\nAdd new data to archive: {}\n\n\nArchive size: {}\nEverything is Ok\n",
+        count(kept, "file", "files"),
+        count(added, "file", "files"),
+        size_with_unit(archive_size)
+    ));
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
