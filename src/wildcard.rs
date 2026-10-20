@@ -2,13 +2,15 @@
 /// then dropping empty components and components equal to `.`.
 /// `..` is kept as a literal component.
 fn split_components(s: &str) -> Vec<&str> {
+    // Iterate bytes: '/' and '\\' are ASCII, so every split point is a
+    // char boundary even when components contain multibyte UTF-8.
     let mut components = Vec::new();
     let mut start = 0;
-    let chars: Vec<char> = s.chars().collect();
-    let len = chars.len();
+    let bytes = s.as_bytes();
+    let len = bytes.len();
 
     for i in 0..len {
-        if chars[i] == '/' || chars[i] == '\\' {
+        if bytes[i] == b'/' || bytes[i] == b'\\' {
             let component = &s[start..i];
             if !component.is_empty() && component != "." {
                 components.push(component);
