@@ -919,3 +919,58 @@ fn cli_keeps_permissions_and_symlinked_archive() {
     assert_eq!(names.last().map(String::as_str), Some("f.txt"));
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// Updating an AES-encrypted 7z must not add members in plaintext: `u`
+/// (add or replace) and `d` of a member of an encrypted folder fail and
+/// leave the archive byte-identical; renames stay header-only.
+#[test]
+fn cli_update_refuses_encrypted_7z() {
+    let d = scratch("cli-7z-aes");
+    std::fs::write(d.join("a.txt"), b"oldstuff-secret\n").unwrap();
+    std::fs::write(d.join("b.txt"), b"newstuff-plaintext-marker\n").unwrap();
+    set_mtime(&d.join("a.txt"), 1_700_000_000);
+    let (c, _, err) = run(&d, &["a", "-psecretpw", "enc.7z", "a.txt"]);
+    assert_eq!(c, 0, "{err}");
+    let before = std::fs::read(d.join("enc.7z")).unwrap();
+
+    // Add a new file.
+    let (c, _, err) = run(&d, &["u", "enc.7z", "b.txt"]);
+    assert_ne!(c, 0, "adding to an encrypted 7z must fail: {err}");
+    let after = std::fs::read(d.join("enc.7z")).unwrap();
+    assert!(!contains(&after, b"newstuff-plaintext-marker"), "new member stored in plaintext");
+    assert_eq!(after, before, "archive left byte-identical");
+
+    // Replace an existing (encrypted) member with a newer version.
+    std::fs::write(d.join("a.txt"), b"replacement-plaintext-marker\n").unwrap();
+    set_mtime(&d.join("a.txt"), 1_700_000_100);
+    let (c, _, err) = run(&d, &["u", "enc.7z", "a.txt"]);
+    assert_ne!(c, 0, "replacing in an encrypted 7z must fail: {err}");
+    let after = std::fs::read(d.join("enc.7z")).unwrap();
+    assert!(!contains(&after, b"replacement-plaintext-marker"));
+    assert_eq!(after, before);
+
+    // Library level: the same plans are rejected.
+    let ex = existing(&before);
+    for incoming in [vec![mem_entry("b.txt", b"newstuff\n", 1)], vec![mem_entry("a.txt", b"newer\n", i64::MAX / 4)]] {
+        let (plan, _) = plan_update(&ex, &incoming).unwrap();
+        assert_eq!(apply_plan(&src_of(&before), &plan, 5, &limits()).unwrap_err(), UpdateError::Unsupported);
+    }
+
+    // Deleting one member of a solid encrypted folder would re-encode the
+    // survivors without encryption: refused, archive untouched.
+    let (c, _, err) = run(&d, &["a", "-psecretpw", "solid.7z", "a.txt", "b.txt"]);
+    assert_eq!(c, 0, "{err}");
+    let solid = std::fs::read(d.join("solid.7z")).unwrap();
+    if sevenz_packs(&solid).len() == 1 {
+        let (c, _, _) = run(&d, &["d", "solid.7z", "a.txt"]);
+        assert_ne!(c, 0, "re-encoding survivors of an encrypted folder must fail");
+        assert_eq!(std::fs::read(d.join("solid.7z")).unwrap(), solid);
+    }
+
+    // Rename only rewrites the header: allowed, data stays encrypted.
+    let (c, _, err) = run(&d, &["rn", "enc.7z", "a.txt", "c.txt"]);
+    assert_eq!(c, 0, "{err}");
+    let renamed = std::fs::read(d.join("enc.7z")).unwrap();
+    assert_eq!(sevenz_packs(&renamed), sevenz_packs(&before), "encrypted packed streams copied verbatim");
+    let _ = std::fs::remove_dir_all(&d);
+}
