@@ -168,3 +168,18 @@ fn mutations_never_panic() {
         }
     }
 }
+
+#[test]
+fn read_all_total_output_budget() {
+    let bytes = fixture("chm", "help.chm");
+    let chm = ChmArchive::parse(&bytes, lim()).unwrap();
+    let full: u64 = chm.read_all().iter().map(|r| r.as_ref().unwrap().len() as u64).sum();
+    assert!(full > 1000);
+    let budget = full / 2;
+    let chm = ChmArchive::parse(&bytes, ChmLimits { max_total_size: budget, ..lim() }).unwrap();
+    let all = chm.read_all();
+    let ok: u64 = all.iter().filter_map(|r| r.as_ref().ok()).map(|d| d.len() as u64).sum();
+    assert!(ok <= budget, "{ok} > {budget}");
+    assert!(all.contains(&Err(ChmError::LimitExceeded)));
+    assert_eq!(ChmLimits::default().max_total_size, 4 << 30);
+}

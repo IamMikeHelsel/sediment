@@ -253,3 +253,79 @@ fn mszip_block_api() {
     dec2.decode_block(&b1, 3).unwrap();
     assert_eq!(dec2.decode_block(&bytes, 3).unwrap(), b"abc");
 }
+
+/// MSZIP block ("CK" + raw deflate) that inflates to 32768 zero bytes.
+const ZERO_BLOCK: [u8; 48] = [
+    b'C', b'K', 237, 193, 1, 1, 0, 0, 0, 128, 144, 254, 175, 238, 8, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
+];
+
+/// Decompression bomb: `folders` CFFOLDERs all pointing at the same chain of
+/// `blocks` MSZIP CFDATA blocks, `files_per_folder` full-size files each.
+fn shared_range_bomb(blocks: u16, folders: u16, files_per_folder: u16) -> Vec<u8> {
+    let nfiles = folders * files_per_folder;
+    let folder_size = u32::from(blocks) * 32768;
+    let coff_files = 36 + 8 * u32::from(folders);
+    let files_len = u32::from(nfiles) * (16 + 2);
+    let data_off = coff_files + files_len;
+    let mut b = Vec::new();
+    b.extend_from_slice(b"MSCF");
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes()); // cbCabinet (patched below)
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&coff_files.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&[3, 1]);
+    b.extend_from_slice(&folders.to_le_bytes());
+    b.extend_from_slice(&nfiles.to_le_bytes());
+    b.extend_from_slice(&[0; 6]); // flags, setID, iCabinet
+    for _ in 0..folders {
+        b.extend_from_slice(&data_off.to_le_bytes());
+        b.extend_from_slice(&blocks.to_le_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes());
+    }
+    for k in 0..nfiles {
+        b.extend_from_slice(&folder_size.to_le_bytes());
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&(k / files_per_folder).to_le_bytes());
+        b.extend_from_slice(&[0x21, 0x00, 0, 0, 0x20, 0]);
+        b.extend_from_slice(&[b'a' + (k % 26) as u8, 0]);
+    }
+    assert_eq!(b.len() as u32, data_off);
+    for _ in 0..blocks {
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&(ZERO_BLOCK.len() as u16).to_le_bytes());
+        b.extend_from_slice(&32768u16.to_le_bytes());
+        b.extend_from_slice(&ZERO_BLOCK);
+    }
+    let n = b.len() as u32;
+    b[8..12].copy_from_slice(&n.to_le_bytes());
+    b
+}
+
+#[test]
+fn extract_all_rejects_folders_sharing_cfdata() {
+    // 64 folders x 64 blocks: unchecked this decodes 64 x 2 MiB from 4 KiB.
+    let bytes = shared_range_bomb(64, 64, 1);
+    let cab = CabArchive::parse(&bytes, lim()).unwrap();
+    let all = cab.extract_all();
+    assert_eq!(all.len(), 64);
+    assert_eq!(all[0].as_ref().map(Vec::len), Ok(64 * 32768));
+    for (i, r) in all.iter().enumerate().skip(1) {
+        assert_eq!(r.as_ref().err(), Some(&CabError::InvalidFolder), "file {i}");
+    }
+}
+
+#[test]
+fn extract_all_total_output_budget() {
+    // one 1 MiB folder referenced by 64 full-size files: 64 MiB of output
+    let bytes = shared_range_bomb(32, 1, 64);
+    let budget = 4u64 << 20;
+    let cab = CabArchive::parse(&bytes, CabLimits { max_total_size: budget, ..lim() }).unwrap();
+    let all = cab.extract_all();
+    let ok: u64 = all.iter().filter_map(|r| r.as_ref().ok()).map(|d| d.len() as u64).sum();
+    assert_eq!(ok, budget);
+    assert_eq!(all[4], Err(CabError::LimitExceeded));
+    assert_eq!(all[63], Err(CabError::LimitExceeded));
+    assert_eq!(CabLimits::default().max_total_size, 4 << 30);
+}
