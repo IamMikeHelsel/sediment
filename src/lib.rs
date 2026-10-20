@@ -180,3 +180,4 @@ pub mod method_switch_parse;
 pub mod tar_sparse_map;
 pub mod iso_eltorito;
 pub mod flv_demux;
+pub mod ntfs_indx;
