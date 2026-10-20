@@ -65,7 +65,7 @@ use crate::cli_seam::listfile::{ListFileError, parse_listfile};
 use crate::cli_seam::slt_format::{SltEntry, format_entry};
 use crate::cli_slt::{archive_header, format_table, format_table_row, generic_entry, sevenz_details, table_rows};
 use crate::cli_seam::wildcard::{match_name, match_path};
-use crate::compress_wrap::{Compression, WrapError, compress, compress_bound_for};
+use crate::compress_wrap::{Compression, WrapError, compress_bound_for, compress_mt};
 use crate::extract_fs::{ExtractError, ExtractOptions, OverwritePolicy, SymlinkPolicy, execute_plan};
 use crate::extract_plan::{
     EntryKind, Plan, PlanKind, PlanOptions, PlanWarning, PlannedEntry, normalize_path, plan_extraction,
@@ -77,7 +77,7 @@ use crate::fs_collect::{
 use crate::sevenz_write::{SevenZWriteError, SevenZWriteLimits, SevenZWriteOptions, create_7z};
 use crate::tar_create::{TarCreateError, TarCreateLimits, TarFormat, create_tar, create_tar_with_format};
 use crate::volume_io::{VolumeError, first_volume_base, read_volumes, write_volumes};
-use crate::zip_create::{ZipCreateError, ZipCreateLimits, ZipCreateOptions, ZipMethod, create_zip_with_method};
+use crate::zip_create::{ZipCreateError, ZipCreateLimits, ZipCreateOptions, ZipMethod, create_zip_with_method_mt};
 
 /// Largest archive read by `l`/`t`/`x`/`e`.
 pub const MAX_ARCHIVE: u64 = 1 << 30;
@@ -1156,9 +1156,9 @@ enum BuildError {
 }
 
 /// Compress one stream with `compress_wrap` (level mapping per format).
-fn compress_stream(c: Compression, data: &[u8], level: u8) -> Result<Vec<u8>, BuildError> {
+fn compress_stream(c: Compression, data: &[u8], level: u8, threads: usize) -> Result<Vec<u8>, BuildError> {
     let bound = compress_bound_for(c, data.len()).ok_or(BuildError::Fatal)?;
-    compress(c, data, level, bound).map_err(|e| if e == WrapError::Allocation { BuildError::Memory } else { BuildError::Fatal })
+    compress_mt(c, data, level, bound, threads).map_err(|e| if e == WrapError::Allocation { BuildError::Memory } else { BuildError::Fatal })
 }
 
 /// A concrete input path and the archive directory its entries go under.
@@ -1422,9 +1422,17 @@ struct WriteMethods {
     tar: Option<TarFormat>,
 }
 
+/// `Some(Some(n))` for a valid `-mmt` switch (n = requested threads, 0 =
+/// all cores), `Some(None)` for a malformed one, `None` for other switches.
+fn mmt_switch(m: &OsStr) -> Option<Option<usize>> {
+    let s = m.to_string_lossy().to_ascii_lowercase();
+    s.strip_prefix("-mmt").map(crate::mt_pool::parse_mmt)
+}
+
 fn build_archive(
     target: AddTarget,
     level: u8,
+    threads: usize,
     sevenz: &SevenZWriteOptions,
     wm: WriteMethods,
     g: &Gathered,
@@ -1442,7 +1450,7 @@ fn build_archive(
     }
     let entries: Vec<_> = g.entries.iter().zip(datas.iter()).map(|(e, d)| e.as_archive_entry(d)).collect();
     let built = match target {
-        AddTarget::Zip => match create_zip_with_method(&entries, ZipCreateOptions { level }, wm.zip, ZipCreateLimits::default()) {
+        AddTarget::Zip => match create_zip_with_method_mt(&entries, ZipCreateOptions { level }, wm.zip, ZipCreateLimits::default(), threads) {
             Ok(z) => {
                 for &i in &z.skipped {
                     ui.err(&format!(
@@ -1463,7 +1471,7 @@ fn build_archive(
             Some(f) => create_tar_with_format(&entries, f, TarCreateLimits::default()),
         } {
             Ok(t) if c == Compression::None => Ok(t),
-            Ok(t) => compress_stream(c, &t, level),
+            Ok(t) => compress_stream(c, &t, level, threads),
             Err(TarCreateError::Allocation) => Err(BuildError::Memory),
             Err(e) => {
                 ui.err(&format!("cannot build tar: {e:?}"));
@@ -1496,7 +1504,7 @@ fn build_archive(
                 ui.err("this archive type holds exactly one file");
                 return Err(EXIT_FATAL);
             }
-            compress_stream(c, &datas[files[0]], level)
+            compress_stream(c, &datas[files[0]], level, threads)
         }
     };
     built.map_err(|e| match e {
@@ -1587,7 +1595,7 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         AddTarget::SevenZ | AddTarget::Wim => Ok(()),
         AddTarget::Zip => zip_method_from_switches(&cl.methods).map(|m| wm.zip = m),
         AddTarget::Tar(_) => tar_format_from_switches(&cl.methods).map(|f| wm.tar = f),
-        AddTarget::Stream(_) => match cl.methods.first() {
+        AddTarget::Stream(_) => match cl.methods.iter().find(|m| mmt_switch(m).is_none()) {
             Some(m) => Err(format!("method switch is not supported for this archive type: {}", m.to_string_lossy())),
             None => Ok(()),
         },
@@ -1596,6 +1604,19 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         ui.err(&m);
         return EXIT_CMDLINE;
     }
+    // `-mmt[=N]` (any format; the last one wins, default all cores).
+    let mut threads = 0usize;
+    for m in &cl.methods {
+        match mmt_switch(m) {
+            Some(Some(n)) => threads = n,
+            Some(None) => {
+                ui.err(&format!("invalid switch: {}", m.to_string_lossy()));
+                return EXIT_CMDLINE;
+            }
+            None => {}
+        }
+    }
+    let threads = crate::mt_pool::resolve_threads(threads);
     if cl.to_stdout && ui.con.stdout_is_terminal {
         ui.err("refusing to write archive data to a terminal (-so)");
         return EXIT_CMDLINE;
@@ -1643,7 +1664,7 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
         return EXIT_WARNING;
     }
     let level = cl.level.unwrap_or(5);
-    let bytes = match build_archive(target, level, &sevenz, wm, &g, ui) {
+    let bytes = match build_archive(target, level, threads, &sevenz, wm, &g, ui) {
         Ok(b) => b,
         Err(c) => return c,
     };

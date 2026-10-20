@@ -25,8 +25,12 @@
 //! solid block: a chain `filter? -> codec` with one packed stream. Files of
 //! size zero and directories are "empty streams" and own no data.
 //!
-//! Folders are compressed in parallel on `std::thread::scope` workers; output
-//! is byte-identical regardless of the thread count.
+//! Folders are compressed in parallel on `std::thread::scope` workers. With
+//! more than one worker, LZMA2 folders are additionally cut into independent
+//! blocks (dictionary reset per block, [`crate::lzma2_mt`]) and all blocks
+//! share one pool ([`crate::mt_pool`]). Output is deterministic for a given
+//! thread count; folders no larger than 1 MiB, and every folder with one
+//! worker, are encoded exactly as by the single-threaded encoder.
 //!
 //! Everything is slice-in / `Vec`-out; all sizes are checked against
 //! [`SevenZWriteLimits`] with checked arithmetic, and buffers use
@@ -40,6 +44,8 @@ use crate::filter_bcj::{BcjArch, bcj_encode};
 use crate::fs_collect::{ArchiveEntry, EntryKind};
 use crate::lzma_encode::{LzmaEncoderOptions, MAX_INPUT, effective_dictionary_size, encode_lzma_raw, props_byte};
 use crate::lzma2_encode::{Lzma2EncodeError, encode_lzma2};
+use crate::lzma2_mt::{join_lzma2_parts, lzma2_block_size};
+use crate::mt_pool::map_ordered;
 use crate::sevenz_header::{ATTR_DIRECTORY, ATTR_UNIX_EXTENSION, SIGNATURE, method_id, property_id as pid};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -400,21 +406,45 @@ fn lzma_coder(input: &[u8], opts: &LzmaEncoderOptions) -> Result<(CoderSpec, Vec
     Ok((CoderSpec { id: method_id::LZMA.to_vec(), props }, packed))
 }
 
-fn encode_folder(data: &[u8], opts: &SevenZWriteOptions) -> Result<FolderOut> {
+/// The filter stage of a folder: the optional BCJ coder and the bytes the
+/// main codec compresses (borrowed when there is no filter).
+struct FolderInput<'a> {
+    coders: Vec<CoderSpec>,
+    sizes: Vec<u64>,
+    len: u64,
+    input: std::borrow::Cow<'a, [u8]>,
+}
+
+fn filter_folder<'a>(data: std::borrow::Cow<'a, [u8]>, opts: &SevenZWriteOptions) -> Result<FolderInput<'a>> {
     let len = data.len() as u64;
     let mut coders = Vec::new();
     let mut sizes = Vec::new();
-    let filtered;
-    let mut input = data;
-    if let Some(arch) = opts.filter {
-        filtered = bcj_encode(arch, 0, data, data.len()).map_err(|e| match e {
-            crate::filter_bcj::BcjError::Allocation => SevenZWriteError::Allocation,
-            _ => SevenZWriteError::EncoderFailed,
-        })?;
-        input = &filtered;
-        coders.push(CoderSpec { id: method_bytes(arch.sevenz_method_id()), props: Vec::new() });
-        sizes.push(len);
+    let input = match opts.filter {
+        Some(arch) => {
+            let filtered = bcj_encode(arch, 0, &data, data.len()).map_err(|e| match e {
+                crate::filter_bcj::BcjError::Allocation => SevenZWriteError::Allocation,
+                _ => SevenZWriteError::EncoderFailed,
+            })?;
+            coders.push(CoderSpec { id: method_bytes(arch.sevenz_method_id()), props: Vec::new() });
+            sizes.push(len);
+            std::borrow::Cow::Owned(filtered)
+        }
+        None => data,
+    };
+    Ok(FolderInput { coders, sizes, len, input })
+}
+
+fn lzma2_error(e: Lzma2EncodeError) -> SevenZWriteError {
+    match e {
+        Lzma2EncodeError::InvalidOptions => SevenZWriteError::InvalidOptions,
+        Lzma2EncodeError::InputTooLarge => SevenZWriteError::LimitExceeded,
+        Lzma2EncodeError::Allocation => SevenZWriteError::Allocation,
     }
+}
+
+fn encode_folder(data: &[u8], opts: &SevenZWriteOptions) -> Result<FolderOut> {
+    let FolderInput { mut coders, mut sizes, len, input } = filter_folder(std::borrow::Cow::Borrowed(data), opts)?;
+    let input: &[u8] = &input;
     let packed = match opts.method {
         SevenZMethod::Copy => {
             let mut v = Vec::new();
@@ -432,17 +462,73 @@ fn encode_folder(data: &[u8], opts: &SevenZWriteOptions) -> Result<FolderOut> {
             if input.len() > MAX_INPUT {
                 return Err(SevenZWriteError::LimitExceeded);
             }
-            let (p, dict_byte) = encode_lzma2(input, &opts.lzma).map_err(|e| match e {
-                Lzma2EncodeError::InvalidOptions => SevenZWriteError::InvalidOptions,
-                Lzma2EncodeError::InputTooLarge => SevenZWriteError::LimitExceeded,
-                Lzma2EncodeError::Allocation => SevenZWriteError::Allocation,
-            })?;
+            let (p, dict_byte) = encode_lzma2(input, &opts.lzma).map_err(lzma2_error)?;
             coders.push(CoderSpec { id: method_id::LZMA2.to_vec(), props: vec![dict_byte] });
             p
         }
     };
     sizes.push(len);
     Ok(FolderOut { coders, unpack_sizes: sizes, packed })
+}
+
+/// LZMA2 folders on several workers: every folder is cut into blocks
+/// ([`lzma2_block_size`] for the whole worker count), all blocks of all
+/// folders go through one pool, and each folder's blocks are joined into one
+/// LZMA2 stream ([`join_lzma2_parts`]).
+fn encode_all_lzma2_mt(
+    items: &[SevenZItem<'_>],
+    blocks: &[Vec<usize>],
+    opts: &SevenZWriteOptions,
+    pack: Option<&dyn PackCoder>,
+    threads: usize,
+) -> Result<Vec<FolderOut>> {
+    let inputs = map_ordered(blocks, threads, SevenZWriteError::Allocation, |b| filter_folder(block_data(items, b)?, opts))?;
+    // (folder, start, end) per job, in folder order.
+    let mut jobs: Vec<(usize, usize, usize)> = Vec::new();
+    for (f, fi) in inputs.iter().enumerate() {
+        let n = fi.input.len();
+        if n > MAX_INPUT {
+            return Err(SevenZWriteError::LimitExceeded);
+        }
+        let step = lzma2_block_size(opts.lzma.dictionary_size, n, threads);
+        let mut start = 0usize;
+        loop {
+            let end = start.saturating_add(step).min(n);
+            jobs.try_reserve(1).map_err(|_| SevenZWriteError::Allocation)?;
+            jobs.push((f, start, end));
+            if end >= n {
+                break;
+            }
+            start = end;
+        }
+    }
+    let parts = map_ordered(&jobs, threads, SevenZWriteError::Allocation, |&(f, s, e)| {
+        encode_lzma2(&inputs[f].input[s..e], &opts.lzma).map_err(lzma2_error)
+    })?;
+    let mut parts = parts.into_iter().zip(jobs.iter().map(|j| j.0)).peekable();
+    let mut joined: Vec<FolderOut> = Vec::new();
+    joined.try_reserve_exact(inputs.len()).map_err(|_| SevenZWriteError::Allocation)?;
+    for (f, fi) in inputs.into_iter().enumerate() {
+        let mut mine = Vec::new();
+        while let Some((part, _)) = parts.next_if(|(_, pf)| *pf == f) {
+            mine.push(part);
+        }
+        let (packed, dict_byte) = join_lzma2_parts(&mine).map_err(lzma2_error)?;
+        let FolderInput { mut coders, mut sizes, len, input } = fi;
+        drop(input);
+        coders.push(CoderSpec { id: method_id::LZMA2.to_vec(), props: vec![dict_byte] });
+        sizes.push(len);
+        joined.push(FolderOut { coders, unpack_sizes: sizes, packed });
+    }
+    if pack.is_none() {
+        return Ok(joined);
+    }
+    // Ordered, possibly parallel, innermost coder (e.g. encryption).
+    let cells: Vec<Mutex<Option<FolderOut>>> = joined.into_iter().map(|f| Mutex::new(Some(f))).collect();
+    map_ordered(&cells, threads, SevenZWriteError::Allocation, |c| {
+        let f = c.lock().ok().and_then(|mut g| g.take()).ok_or(SevenZWriteError::EncoderFailed)?;
+        apply_pack(f, pack)
+    })
 }
 
 /// Concatenate the data of the files in one block (borrow when single).
@@ -479,13 +565,11 @@ fn encode_all(
     opts: &SevenZWriteOptions,
     pack: Option<&dyn PackCoder>,
 ) -> Result<Vec<FolderOut>> {
-    let threads = if opts.threads == 0 {
-        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
-    } else {
-        opts.threads
+    let total = crate::mt_pool::resolve_threads(opts.threads);
+    if total > 1 && opts.method == SevenZMethod::Lzma2 {
+        return encode_all_lzma2_mt(items, blocks, opts, pack, total);
     }
-    .clamp(1, 256)
-    .min(blocks.len().max(1));
+    let threads = total.min(blocks.len().max(1));
 
     let work = |b: &Vec<usize>| -> Result<FolderOut> {
         let data = block_data(items, b)?;
