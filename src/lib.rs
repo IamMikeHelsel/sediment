@@ -144,3 +144,4 @@ pub mod elf_sections;
 pub mod mbr_gpt;
 pub mod base64_codec;
 pub mod slt_format;
+pub mod cramfs_dir;
