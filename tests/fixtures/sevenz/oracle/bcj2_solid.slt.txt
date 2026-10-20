@@ -1,0 +1,39 @@
+
+7-Zip (z) 26.04 (arm64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-10-05
+ 64-bit arm_v:8-A locale=C.UTF-8 Threads:20 OPEN_MAX:32768, ASM
+
+Scanning the drive for archives:
+1 file, 8966 bytes (9 KiB)
+
+Listing archive: ../out/bcj2_solid.7z
+
+--
+Path = ../out/bcj2_solid.7z
+Type = 7z
+Physical Size = 8966
+Headers Size = 208
+Method = LZMA2:48k LZMA:48k BCJ2
+Solid = +
+Blocks = 1
+
+----------
+Path = notes.txt
+Size = 23637
+Packed Size = 8758
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = A -rw-rw-r--
+CRC = 92771F57
+Encrypted = -
+Method = BCJ2 LZMA2:48k LZMA:48k:lc0:lp2 LZMA:48k:lc0:lp2
+Block = 0
+
+Path = prog.o
+Size = 20296
+Packed Size = 
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = A -rw-rw-r--
+CRC = BA4C6173
+Encrypted = -
+Method = BCJ2 LZMA2:48k LZMA:48k:lc0:lp2 LZMA:48k:lc0:lp2
+Block = 0
+

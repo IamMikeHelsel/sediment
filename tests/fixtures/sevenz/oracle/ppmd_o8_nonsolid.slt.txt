@@ -1,0 +1,39 @@
+
+7-Zip (z) 26.04 (arm64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-10-05
+ 64-bit arm_v:8-A locale=C.UTF-8 Threads:20 OPEN_MAX:32768, ASM
+
+Scanning the drive for archives:
+1 file, 8425 bytes (9 KiB)
+
+Listing archive: ../out/ppmd_o8_nonsolid.7z
+
+--
+Path = ../out/ppmd_o8_nonsolid.7z
+Type = 7z
+Physical Size = 8425
+Headers Size = 182
+Method = PPMD
+Solid = -
+Blocks = 2
+
+----------
+Path = notes.txt
+Size = 23637
+Packed Size = 2763
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = A -rw-rw-r--
+CRC = 92771F57
+Encrypted = -
+Method = PPMD:o8:mem19
+Block = 0
+
+Path = prog.o
+Size = 20296
+Packed Size = 5480
+Modified = 2024-03-05 06:07:08.0000000
+Attributes = A -rw-rw-r--
+CRC = BA4C6173
+Encrypted = -
+Method = PPMD:o8:mem19
+Block = 1
+

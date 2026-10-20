@@ -14,6 +14,7 @@ pub mod archive_reader;
 pub mod archive_update;
 pub mod arj_read;
 pub mod base64_codec;
+pub mod bcj2;
 pub mod bench;
 pub mod bit_reader;
 pub mod bit_writer;

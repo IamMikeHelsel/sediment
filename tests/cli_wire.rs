@@ -395,7 +395,10 @@ fn sevenz_links_need_snl() {
 
 #[test]
 fn corrupt_inputs_fail_cleanly() {
-    for name in ["bad_crc.tar.gz", "truncated.tar.xz", "corrupt.bz2", "bad_checksum.tar", "7z/tree_ppmd.7z"] {
+    // 7z/tree_ppmd.7z used to be here as an unsupported method; PPMd now decodes (sevenz-ppmd-bcj2).
+    let o = run(&["t".as_ref(), fx("7z/tree_ppmd.7z").as_os_str()]);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    for name in ["bad_crc.tar.gz", "truncated.tar.xz", "corrupt.bz2", "bad_checksum.tar"] {
         let o = run(&["t".as_ref(), fx(name).as_os_str()]);
         assert_eq!(o.status.code(), Some(2), "{name}: {}", text(&o.stderr));
         assert!(o.stdout.is_empty(), "{name}");
@@ -404,7 +407,22 @@ fn corrupt_inputs_fail_cleanly() {
         assert_eq!(o.status.code(), Some(2), "{name}: {}", text(&o.stderr));
         assert!(!text(&o.stderr).contains("panicked"), "{name}");
     }
-    let o = run(&["t".as_ref(), fx("7z/tree_ppmd.7z").as_os_str()]);
+    // An unknown coder method: the PPMd fixture (plain header) with its method ID
+    // patched to 03 04 7F and the header CRCs recomputed.
+    let mut b = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sevenz/oracle/ppmd_o8_nonsolid.7z")).unwrap();
+    let off = 32 + u64::from_le_bytes(b[12..20].try_into().unwrap()) as usize;
+    let len = u64::from_le_bytes(b[20..28].try_into().unwrap()) as usize;
+    let at = b[off..off + len].windows(4).position(|w| w == [0x23, 3, 4, 1]).unwrap();
+    b[off + at + 3] = 0x7F;
+    let c = sediment_engine::crc32::crc32(&b[off..off + len]).to_le_bytes();
+    b[28..32].copy_from_slice(&c);
+    let c = sediment_engine::crc32::crc32(&b[12..32]).to_le_bytes();
+    b[8..12].copy_from_slice(&c);
+    let t = TempDir::new("unknown-method");
+    let unknown = t.0.join("unknown_method.7z");
+    fs::write(&unknown, &b).unwrap();
+    let o = run(&["t".as_ref(), unknown.as_os_str()]);
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o.stderr));
     assert!(text(&o.stderr).contains("unsupported compression method"), "{}", text(&o.stderr));
     let o = run(&["t".as_ref(), fx("bad_crc.tar.gz").as_os_str()]);
     assert_eq!(text(&o.stderr), "sediment: data error (checksum mismatch)\n");
