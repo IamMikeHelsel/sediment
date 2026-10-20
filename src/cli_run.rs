@@ -55,6 +55,7 @@ use crate::cli_crypt::{CryptSwitches, run_add_crypt, take_crypt_switches};
 use crate::archive_reader::{ArchiveFormat, ArchiveReader, ReaderError, ReaderLimits};
 use crate::cli_add::{ArchiveFormat as AddFormat, format_from_name};
 use crate::cli_add_7z::parse_7z_add_args;
+use crate::wim_write::{WimWriteCompression, WimWriteError, WimWriteLimits, WimWriteOptions, create_wim};
 use crate::cli_stdio::{STDIN_LIMIT_ENV, StdioError, read_limited, run_add_stdio, stdin_limit, wants_stdio};
 use crate::cli_compat::{
     ArchiveType, Charset, CmdLineError, Command, CommandLine, EXIT_CMDLINE, EXIT_FATAL, EXIT_MEMORY, EXIT_OK,
@@ -1290,6 +1291,8 @@ pub enum AddTarget {
     /// One file compressed as a bare stream (`.gz`, `.bz2`, `.xz`).
     Stream(Compression),
     SevenZ,
+    /// Single-image WIM (`.wim`; uncompressed with `-mx0`, else XPRESS).
+    Wim,
 }
 
 /// Why [`add_target`] found no output layout.
@@ -1329,6 +1332,8 @@ pub fn add_target(archive: &Path, t: Option<ArchiveType>) -> Result<AddTarget, A
         Ok(AddTarget::Stream(Compression::Xz))
     } else if ends(".7z") {
         Ok(AddTarget::SevenZ)
+    } else if ends(".wim") {
+        Ok(AddTarget::Wim)
     } else {
         Err(AddTargetError::UnknownName)
     }
@@ -1653,6 +1658,18 @@ fn build_archive(
                 return Err(EXIT_FATAL);
             }
         },
+        AddTarget::Wim => {
+            let compression = if level == 0 { WimWriteCompression::None } else { WimWriteCompression::Xpress };
+            let opts = WimWriteOptions { compression, ..WimWriteOptions::default() };
+            match create_wim(&entries, &opts, WimWriteLimits::default()) {
+                Ok(b) => Ok(b),
+                Err(WimWriteError::Allocation) => Err(BuildError::Memory),
+                Err(e) => {
+                    ui.err(&format!("cannot build wim: {e:?}"));
+                    return Err(EXIT_FATAL);
+                }
+            }
+        }
         AddTarget::Stream(c) => {
             let files: Vec<usize> = (0..g.entries.len()).filter(|&i| g.entries[i].kind == FsKind::File).collect();
             if files.len() != 1 || g.entries.len() != 1 {
@@ -1726,7 +1743,7 @@ fn run_add(cl: &CommandLine, ui: &mut Ui<'_, '_>) -> i32 {
     let target = match add_target(archive, cl.archive_type) {
         Ok(t) => t,
         Err(AddTargetError::UnknownName) => {
-            ui.err("cannot infer archive format from name (use -t or .zip, .7z, .tar, .tar.gz, .tgz, .tar.xz, .tar.bz2, .gz, .bz2, .xz)");
+            ui.err("cannot infer archive format from name (use -t or .zip, .7z, .wim, .tar, .tar.gz, .tgz, .tar.xz, .tar.bz2, .gz, .bz2, .xz)");
             return EXIT_CMDLINE;
         }
         Err(AddTargetError::ReadOnlyType) => {
