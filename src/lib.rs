@@ -164,3 +164,4 @@ pub mod reader_qcow2;
 pub mod sevenz_sfx_scan;
 pub mod qcow2_compressed;
 pub mod gzip_slt_info;
+pub mod partition_type_names;
