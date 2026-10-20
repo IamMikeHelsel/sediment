@@ -144,9 +144,54 @@ pub fn create_zip(
     options: ZipCreateOptions,
     limits: ZipCreateLimits,
 ) -> Result<ZipCreated, ZipCreateError> {
+    create_zip_mt(entries, options, limits, 1)
+}
+
+/// [`create_zip`] with each file's DEFLATE data compressed on up to
+/// `threads` workers ([`crate::mt_pool::map_ordered`]). Files are
+/// independent, so the archive is byte-identical for every thread count.
+pub fn create_zip_mt(
+    entries: &[ArchiveEntry<'_>],
+    options: ZipCreateOptions,
+    limits: ZipCreateLimits,
+    threads: usize,
+) -> Result<ZipCreated, ZipCreateError> {
     if options.level > 9 {
         return Err(ZipCreateError::InvalidLevel);
     }
+    // Validate names and the input limit before spending CPU on DEFLATE.
+    let mut planned: u64 = 0;
+    for e in entries {
+        if !validate_entry_name(e.name) {
+            return Err(ZipCreateError::InvalidName);
+        }
+        if e.kind != EntryKind::Symlink {
+            planned = planned.checked_add(e.data.len() as u64).ok_or(ZipCreateError::LimitExceeded)?;
+        }
+    }
+    if planned > limits.max_total_input {
+        return Err(ZipCreateError::LimitExceeded);
+    }
+    // DEFLATE every regular, non-empty file up front (in parallel); `None`
+    // means "store" (level 0, empty, or DEFLATE did not shrink the data).
+    let compressible = |e: &ArchiveEntry<'_>| options.level != 0 && e.kind == EntryKind::File && !e.data.is_empty();
+    let deflated: Vec<(u32, Option<Vec<u8>>)> = crate::mt_pool::map_ordered(entries, threads, ZipCreateError::Allocation, |e| {
+        if e.kind == EntryKind::Symlink {
+            return Ok((0, None));
+        }
+        let crc = crc32(e.data);
+        if !compressible(e) {
+            return Ok((crc, None));
+        }
+        // Cap at len-1: anything not strictly smaller is stored instead.
+        match deflate_compress(e.data, options.level, e.data.len() - 1) {
+            Ok(c) => Ok((crc, Some(c))),
+            Err(CompressError::LimitExceeded) => Ok((crc, None)),
+            Err(CompressError::Allocation) => Err(ZipCreateError::Allocation),
+            Err(CompressError::InvalidLevel) => Err(ZipCreateError::InvalidLevel),
+        }
+    })?;
+    let mut deflated = deflated.into_iter();
     let mut skipped = Vec::new();
     let mut prepared: Vec<Prepared<'_>> = Vec::new();
     let mut total_input: u64 = 0;
@@ -161,6 +206,7 @@ pub fn create_zip(
     let mut offset: usize = 0;
 
     for (idx, e) in entries.iter().enumerate() {
+        let (crc, pre) = deflated.next().unwrap_or((0, None));
         if !validate_entry_name(e.name) {
             return Err(ZipCreateError::InvalidName);
         }
@@ -192,17 +238,9 @@ pub fn create_zip(
         if usize_ == u32::MAX {
             return Err(ZipCreateError::Unsupported);
         }
-        let crc = crc32(e.data);
-        let (method, payload): (u16, std::borrow::Cow<'_, [u8]>) = if options.level == 0 || e.data.is_empty() {
-            (0, std::borrow::Cow::Borrowed(e.data))
-        } else {
-            // Cap at len-1: anything not strictly smaller is stored instead.
-            match deflate_compress(e.data, options.level, e.data.len() - 1) {
-                Ok(c) => (8, std::borrow::Cow::Owned(c)),
-                Err(CompressError::LimitExceeded) => (0, std::borrow::Cow::Borrowed(e.data)),
-                Err(CompressError::Allocation) => return Err(ZipCreateError::Allocation),
-                Err(CompressError::InvalidLevel) => return Err(ZipCreateError::InvalidLevel),
-            }
+        let (method, payload): (u16, std::borrow::Cow<'_, [u8]>) = match pre {
+            Some(c) => (8, std::borrow::Cow::Owned(c)),
+            None => (0, std::borrow::Cow::Borrowed(e.data)),
         };
         let (time, date) = dos_time_from_unix(e.mtime);
         let type_bits = if is_dir { S_IFDIR } else { S_IFREG };

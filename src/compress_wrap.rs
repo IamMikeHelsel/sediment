@@ -23,7 +23,7 @@ use crate::crc32::crc32;
 use crate::bzip2_encode::{Bzip2EncodeError, encode_bzip2};
 use crate::deflate_compress::{CompressError, deflate_bound, deflate_compress};
 use crate::lzma_encode::MAX_INPUT;
-use crate::xz_encode::{XzEncodeError, XzOptions, encode_xz};
+use crate::xz_encode::{XzEncodeError, XzOptions, encode_xz, encode_xz_mt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Compression {
@@ -60,6 +60,72 @@ pub fn compress(kind: Compression, input: &[u8], level: u8, max_output: usize) -
         Compression::Gzip => gzip_compress(input, level, max_output),
         Compression::Xz => xz_compress(input, level, max_output),
         Compression::Bzip2 => bzip2_compress(input, level, max_output),
+    }
+}
+
+/// [`compress`] using up to `threads` workers (see [`crate::mt_pool`]).
+///
+/// * xz: inputs larger than one block are written as a multi-block `.xz`
+///   (blocks of `3 * dictionary`, at least 1 MiB, as `xz -T` does), the
+///   blocks' LZMA2 data encoded in parallel.
+/// * bzip2: inputs larger than one bzip2 block are written as a sequence of
+///   complete bzip2 streams of one block each (the multi-stream layout
+///   `bzip2 -d`, Python's `bz2` and `pbzip2` read), compressed in parallel.
+/// * gzip / none: unchanged.
+///
+/// With `threads <= 1` the output is identical to [`compress`]. Otherwise it
+/// depends only on the input and level, not on the exact thread count.
+pub fn compress_mt(kind: Compression, input: &[u8], level: u8, max_output: usize, threads: usize) -> Result<Vec<u8>, WrapError> {
+    if level > 9 {
+        return Err(WrapError::InvalidLevel);
+    }
+    if threads <= 1 {
+        return compress(kind, input, level, max_output);
+    }
+    match kind {
+        Compression::Xz => {
+            if input.len() > MAX_INPUT {
+                return Err(WrapError::LimitExceeded);
+            }
+            let mut opts = XzOptions::preset(level as u32).map_err(|_| WrapError::InvalidLevel)?;
+            let block = (opts.lzma.dictionary_size as usize).saturating_mul(3).max(1 << 20);
+            if input.len() <= block {
+                return xz_compress(input, level, max_output);
+            }
+            opts.block_size = Some(block);
+            let out = encode_xz_mt(input, &opts, threads).map_err(|e| match e {
+                XzEncodeError::InvalidOptions => WrapError::InvalidLevel,
+                XzEncodeError::InputTooLarge => WrapError::LimitExceeded,
+                XzEncodeError::Allocation => WrapError::Allocation,
+            })?;
+            if out.len() > max_output {
+                return Err(WrapError::LimitExceeded);
+            }
+            Ok(out)
+        }
+        Compression::Bzip2 => {
+            let digit = bzip2_block_level(level)?;
+            let chunk = digit as usize * 100_000;
+            if input.len() <= chunk {
+                return bzip2_compress(input, level, max_output);
+            }
+            let pieces: Vec<&[u8]> = input.chunks(chunk).collect();
+            let parts = crate::mt_pool::map_ordered(&pieces, threads, WrapError::Allocation, |p| {
+                let cap = compress_bound_for(Compression::Bzip2, p.len()).ok_or(WrapError::LimitExceeded)?.min(max_output);
+                bzip2_compress(p, level, cap)
+            })?;
+            let total = parts.iter().try_fold(0usize, |a, p| a.checked_add(p.len())).ok_or(WrapError::LimitExceeded)?;
+            if total > max_output {
+                return Err(WrapError::LimitExceeded);
+            }
+            let mut out = Vec::new();
+            out.try_reserve_exact(total).map_err(|_| WrapError::Allocation)?;
+            for p in &parts {
+                out.extend_from_slice(p);
+            }
+            Ok(out)
+        }
+        Compression::None | Compression::Gzip => compress(kind, input, level, max_output),
     }
 }
 

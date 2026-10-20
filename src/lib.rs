@@ -132,3 +132,5 @@ pub mod zipcrypto;
 pub mod zlib_encode;
 pub mod zlib_wrapper;
 pub mod zstd_decode;
+pub mod mt_pool;
+pub mod lzma2_mt;
