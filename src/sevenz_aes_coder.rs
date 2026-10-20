@@ -20,7 +20,10 @@
 //! Limits: the key-derivation cost from untrusted archives is capped by
 //! `max_cycles_power`; decrypted output is capped by `max_output`; derived
 //! keys are cached (at most [`KEY_CACHE_LEN`] entries) because every folder of
-//! a 7-Zip archive normally shares one salt and cost.
+//! a 7-Zip archive normally shares one salt and cost. Cache misses draw on a
+//! per-decoder budget of [`KDF_BUDGET_MAX_COST_DERIVATIONS`]` << max_cycles_power`
+//! SHA-256 rounds, so an archive whose folders rotate through many salts
+//! fails with `LimitExceeded` instead of forcing unbounded CPU work.
 
 use std::cell::{Cell, RefCell};
 
@@ -39,6 +42,9 @@ pub const SEVENZ_AES_METHOD_ID: [u8; 4] = [0x06, 0xf1, 0x07, 0x01];
 pub const SEVENZ_AES_DEFAULT_CYCLES_POWER: u8 = 19;
 /// Derived keys kept per decoder.
 pub const KEY_CACHE_LEN: usize = 8;
+/// Total key-derivation work per decoder, in max-cost derivations
+/// (`2^max_cycles_power` SHA-256 rounds each).
+pub const KDF_BUDGET_MAX_COST_DERIVATIONS: u64 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SevenZAesCoderError {
@@ -132,6 +138,8 @@ pub struct SevenZCryptoDecoder<D> {
     max_cycles_power: u8,
     max_output: u64,
     cache: RefCell<Vec<CachedKey>>,
+    /// SHA-256 rounds spent on key derivation so far.
+    kdf_rounds: Cell<u64>,
     aes_used: Cell<bool>,
     last_error: Cell<Option<SevenZAesCoderError>>,
 }
@@ -168,6 +176,7 @@ impl<D: FolderDecoder> SevenZCryptoDecoder<D> {
             max_cycles_power: SEVENZ_AES_DEFAULT_MAX_CYCLES_POWER,
             max_output,
             cache: RefCell::new(Vec::new()),
+            kdf_rounds: Cell::new(0),
             aes_used: Cell::new(false),
             last_error: Cell::new(None),
         })
@@ -204,6 +213,14 @@ impl<D: FolderDecoder> SevenZCryptoDecoder<D> {
             {
                 return Ok(c.key);
             }
+        }
+        if p.num_cycles_power <= self.max_cycles_power && p.num_cycles_power <= 62 {
+            let budget = KDF_BUDGET_MAX_COST_DERIVATIONS.saturating_mul(1u64 << self.max_cycles_power.min(62));
+            let spent = self.kdf_rounds.get().saturating_add(1u64 << p.num_cycles_power);
+            if spent > budget {
+                return Err(SevenZAesCoderError::LimitExceeded);
+            }
+            self.kdf_rounds.set(spent);
         }
         let key = sevenz_aes_derive_key(pw, salt, p.num_cycles_power, self.max_cycles_power)?;
         let mut cache = self.cache.borrow_mut();
