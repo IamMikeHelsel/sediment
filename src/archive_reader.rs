@@ -77,6 +77,8 @@ pub enum ArchiveFormat {
     Lzma,
     /// LZMA SDK `.lzma86` single stream (x86 BCJ flag + LZMA); see `lzma_alone`.
     Lzma86,
+    /// Apple UDIF disk image (`.dmg`); see `dmg_read`.
+    Dmg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +182,9 @@ mod zip_method {
     pub const XZ: u16 = 95;
     pub const ZSTD: u16 = 93;
     pub const PPMD: u16 = 98;
+    /// Apple LZFSE: method 99 without the encryption flag or a WinZip AES
+    /// (0x9901) record; the payload is an LZFSE frame (`bvx` blocks).
+    pub const LZFSE: u16 = 99;
 }
 
 /// Largest PPMd var.I model accepted inside a ZIP entry (the format maximum).
@@ -279,6 +284,9 @@ pub(crate) fn decode_zip_payload(method: u16, raw: &[u8], size: usize) -> Result
             crate::ppmd8::Ppmd8Error::UnexpectedEof => ReaderError::Truncated,
             _ => ReaderError::Invalid,
         })?,
+        zip_method::LZFSE if crate::lzfse::is_lzfse(raw) => {
+            crate::lzfse::decode_lzfse(raw, size).map_err(|_| ReaderError::Invalid)?
+        }
         _ => return Err(ReaderError::Unsupported),
     };
     if out.len() != size {
