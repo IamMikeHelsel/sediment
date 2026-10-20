@@ -54,6 +54,8 @@ const MAX_LINK_TARGET: u64 = 4096;
 /// Largest LZMA/LZMA2 dictionary accepted (the formats cap it at 4 GiB - 1;
 /// the decoder does not preallocate it, so this only rejects nonsense).
 const MAX_DICTIONARY: u64 = 1 << 32;
+/// Largest PPMd model memory accepted from a 7z coder (7-Zip's own maximum).
+const MAX_PPMD_MEMORY: u64 = 0xFFFF_FFFF - 12 * 3;
 /// Name used for a single-stream entry when no better name exists.
 const FALLBACK_NAME: &[u8] = b"data";
 
@@ -437,6 +439,7 @@ pub mod sevenz_method {
     pub const DEFLATE: u64 = 0x04_0108;
     pub const DEFLATE64: u64 = 0x04_0109;
     pub const BZIP2: u64 = 0x04_0202;
+    pub const PPMD: u64 = 0x03_0401;
 }
 
 fn method_value(id: &[u8]) -> Option<u64> {
@@ -447,7 +450,7 @@ fn method_value(id: &[u8]) -> Option<u64> {
 }
 
 /// [`FolderDecoder`] for the 7z methods Sediment can decode: Copy, LZMA,
-/// LZMA2, Deflate, Deflate64, BZip2, Delta, the BCJ family (x86, PowerPC,
+/// LZMA2, Deflate, Deflate64, BZip2, PPMd (var.H), Delta, the BCJ family (x86, PowerPC,
 /// IA-64, ARM, ARM-Thumb, ARM64, SPARC, RISC-V) and Swap2/Swap4.
 /// `max_output` caps any single coder output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -494,6 +497,14 @@ impl FolderDecoder for SevenZCodecs {
                 inflate64_raw_prefix(input, size, max_blocks).map_err(|_| E::DecoderFailed)?.0
             }
             sevenz_method::BZIP2 => decode_bzip2(input, size).map_err(|_| E::DecoderFailed)?,
+            sevenz_method::PPMD => {
+                let p = crate::ppmd7::parse_properties(props).map_err(|_| E::DecoderFailed)?;
+                crate::ppmd7::decode(p, input, size, MAX_PPMD_MEMORY).map_err(|e| match e {
+                    crate::ppmd7::Ppmd7Error::LimitExceeded => E::LimitExceeded,
+                    crate::ppmd7::Ppmd7Error::Allocation => E::Allocation,
+                    _ => E::DecoderFailed,
+                })?
+            }
             sevenz_method::DELTA => {
                 let d = parse_delta_properties(props).map_err(|_| E::DecoderFailed)?;
                 delta_decode(d, input, size).map_err(|_| E::DecoderFailed)?

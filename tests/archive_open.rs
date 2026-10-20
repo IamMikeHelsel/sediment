@@ -159,10 +159,11 @@ fn integrity_errors() {
     assert!(open(&b, "corrupt.bz2").is_err());
     let b = fx("bad_checksum.tar");
     assert!(open(&b, "bad_checksum.tar").is_err());
+    // PPMd (030401) is decoded since sevenz-ppmd-bcj2; every entry must verify its CRC.
     let b = fx("7z/tree_ppmd.7z");
     let r = open(&b, "p.7z").unwrap();
     let i = r.entries().iter().position(|e| e.size > 0).unwrap();
-    assert_eq!(r.read(i), Err(ReaderError::Unsupported));
+    assert_eq!(r.read(i).map(|d| d.len() as u64), Ok(r.entries()[i].size));
 }
 
 #[test]
