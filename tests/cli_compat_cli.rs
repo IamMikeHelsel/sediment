@@ -766,7 +766,7 @@ fn add_sevenz_with_method_switches() {
             assert!(slt.contains("\nSolid = -\n"), "{slt}");
         }
         if i == 2 {
-            assert!(slt.contains("\nMethod = BCJ LZMA2:"), "{slt}");
+            assert!(slt.contains("\nMethod = LZMA2:") && slt.contains(" BCJ\n"), "{slt}");
         }
         let out = t.path(&format!("x{i}"));
         let o = run(&argv!["x", &arc, out_arg(&out)]);

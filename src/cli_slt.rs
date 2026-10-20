@@ -175,7 +175,8 @@ pub fn sevenz_details(bytes: &[u8], limits: ReaderLimits) -> Result<SevenZDetail
         folder_packed.push(sizes.iter().try_fold(0u64, |a, &s| a.checked_add(s)).ok_or(ReaderError::Invalid)?);
         next += n;
     }
-    let methods: Vec<String> = folders.iter().map(|f| f.coders.iter().map(coder_name).collect::<Vec<_>>().join(" ")).collect();
+    // 7-Zip names a block's coders in reverse storage order ("LZMA2:13 BCJ").
+    let methods: Vec<String> = folders.iter().map(|f| f.coders.iter().rev().map(coder_name).collect::<Vec<_>>().join(" ")).collect();
     let mut entries = Vec::new();
     for e in archive.entries().iter().filter(|e| !e.is_anti) {
         let folder = e.folder_index.filter(|_| e.has_stream);
