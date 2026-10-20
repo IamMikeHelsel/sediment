@@ -335,11 +335,18 @@ pub fn open_zip_fallback<'a>(bytes: &'a [u8], limits: ReaderLimits) -> Result<Bo
 pub type ZDecoder = fn(&[u8], usize) -> Result<Vec<u8>, ReaderError>;
 
 /// The `.Z` decoder used by [`open_legacy`]. The LZW decoder is owned by
-/// the forge `lzw_z` module (`decompress_z(input, max_output)`); until it is
-/// harvested into the crate this is `None` and `.Z` files are reported as
-/// `Unsupported`. Wiring it is one line:
-/// `Some(|b, m| crate::lzw_z::decompress_z(b, m).map_err(z_error))`.
-pub const Z_DECODER: Option<ZDecoder> = None;
+/// the forge `lzw_z` module (`decompress_z(input, max_output)`), wired here.
+pub const Z_DECODER: Option<ZDecoder> = Some(|b, m| crate::lzw_z::decompress_z(b, m).map_err(z_error));
+
+/// Map the forge `lzw_z` errors onto [`ReaderError`].
+fn z_error(e: crate::lzw_z::LzwError) -> ReaderError {
+    use crate::lzw_z::LzwError;
+    match e {
+        LzwError::Truncated => ReaderError::Truncated,
+        LzwError::LimitExceeded => ReaderError::LimitExceeded,
+        LzwError::BadMagic | LzwError::BadHeader | LzwError::InvalidCode => ReaderError::Invalid,
+    }
+}
 
 /// `compress` magic.
 pub fn is_compress_z(bytes: &[u8]) -> bool {
