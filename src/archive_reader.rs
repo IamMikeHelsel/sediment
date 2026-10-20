@@ -73,6 +73,8 @@ pub enum ArchiveFormat {
     Zstd,
     /// Windows Imaging (`.wim`); see `archive_open_ext`.
     Wim,
+    /// Apple UDIF disk image (`.dmg`); see `dmg_read`.
+    Dmg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

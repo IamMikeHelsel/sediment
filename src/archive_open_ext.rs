@@ -202,6 +202,16 @@ pub fn open_named_ext<'a>(
     if is_wim(bytes) {
         return Ok(Box::new(WimReader::new(bytes, limits)?));
     }
+    // UDIF disk images are identified by their trailing `koly` block. The
+    // data fork often starts with a bzip2/xz chunk, so magic-byte formats
+    // are only tried when the image does not parse.
+    if crate::dmg_read::is_dmg(bytes) {
+        match crate::dmg_read::DmgReader::new(bytes, limits) {
+            Ok(r) => return Ok(Box::new(r)),
+            Err(e) if crate::archive_reader::detect_format(bytes).is_none() => return Err(e),
+            Err(_) => {}
+        }
+    }
     if is_zstd(bytes) {
         let max = usize::try_from(limits.max_total_size).unwrap_or(usize::MAX);
         let data = decode_zstd(bytes, max)?;
@@ -224,6 +234,11 @@ pub fn open_named_ext<'a>(
 pub fn open_stdin_ext<'a>(bytes: &'a [u8], limits: ReaderLimits) -> Result<Box<dyn ArchiveReader + 'a>, ReaderError> {
     if is_wim(bytes) {
         return Ok(Box::new(WimReader::new(bytes, limits)?));
+    }
+    if crate::dmg_read::is_dmg(bytes)
+        && let Ok(r) = crate::dmg_read::DmgReader::new(bytes, limits)
+    {
+        return Ok(Box::new(r));
     }
     if is_zstd(bytes) {
         let max = usize::try_from(limits.max_total_size).unwrap_or(usize::MAX);

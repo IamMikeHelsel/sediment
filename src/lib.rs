@@ -133,3 +133,6 @@ pub mod zlib_encode;
 pub mod zlib_wrapper;
 pub mod zstd_decode;
 pub mod lzfse;
+pub mod adc;
+pub mod hfs_read;
+pub mod dmg_read;

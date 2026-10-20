@@ -102,8 +102,9 @@ def main():
     make_dmg(files, OUT / 'goodput_udzo.dmg', 'UDZO')
     big = dict(files)
     big['big/text.txt'] = text(20000, 7) + b'\0' * 40000
-    for fmt in ('ULFO', 'UDBZ', 'ULMO'):
-        make_dmg(big, OUT / f'tree_{fmt.lower()}.dmg', fmt)
+    # Small single-partition (-layout NONE) volumes keep the fixtures small.
+    for fmt in ('ULFO', 'UDBZ', 'ULMO', 'UDCO'):
+        make_dmg(big, OUT / f'tree_{fmt.lower()}.dmg', fmt, ('-layout', 'NONE', '-size', '800k'))
     tree_manifest = {n: hashlib.sha256(d).hexdigest() for n, d in big.items()}
     (OUT / 'tree_manifest.json').write_text(json.dumps(tree_manifest, indent=1, sort_keys=True, ensure_ascii=False) + '\n')
 
