@@ -153,3 +153,4 @@ pub mod qcow2_header;
 pub mod uefi_fv;
 pub mod vdi_header;
 pub mod macho_commands;
+pub mod apm_partition;
