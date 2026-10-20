@@ -71,6 +71,7 @@ pub mod huffman_decode;
 pub mod huffman;
 pub mod ihex_decode;
 pub mod inflate;
+pub mod iso_joliet;
 pub mod iso_rockridge;
 pub mod legacy_open;
 pub mod listfile;
