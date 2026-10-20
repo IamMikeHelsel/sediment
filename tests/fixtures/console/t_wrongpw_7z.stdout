@@ -1,0 +1,17 @@
+
+Testing archive: enc.7z
+--
+Path = enc.7z
+Type = 7z
+Physical Size = 234
+Headers Size = 202
+Method = LZMA2:12 7zAES
+Solid = +
+Blocks = 1
+
+
+Sub items Errors: 2
+
+Archives with Errors: 1
+
+Sub items Errors: 2

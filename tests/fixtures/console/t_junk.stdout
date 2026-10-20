@@ -1,0 +1,22 @@
+
+Testing archive: junk.zip
+
+WARNINGS:
+There are data after the end of archive
+
+--
+Path = junk.zip
+Type = zip
+WARNINGS:
+There are data after the end of archive
+Physical Size = 608
+Tail Size = 32
+
+Everything is Ok
+
+Archives with Warnings: 1
+
+Warnings: 1
+Files: 3
+Size:       2348
+Compressed: 640

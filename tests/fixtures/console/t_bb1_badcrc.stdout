@@ -1,0 +1,16 @@
+
+Testing archive: badcrc.zip
+--
+Path = badcrc.zip
+Type = zip
+Physical Size = 608
+
+T a.txt
+T bin/data.bin
+T empty
+
+Sub items Errors: 1
+
+Archives with Errors: 1
+
+Sub items Errors: 1
