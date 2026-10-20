@@ -152,3 +152,4 @@ pub mod reader_base64;
 pub mod qcow2_header;
 pub mod uefi_fv;
 pub mod vdi_header;
+pub mod macho_commands;
