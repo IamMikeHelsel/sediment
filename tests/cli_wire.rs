@@ -151,10 +151,10 @@ fn x_every_format_matches_reference_tree() {
 
         let o = run(&["l".as_ref(), fx(name).as_os_str()]);
         assert_eq!(o.status.code(), Some(0), "{name}");
+        assert!(text(&o.stdout).contains("   Date      Time    Attr         Size   Compressed  Name\n"), "{name}");
+        let o = run(&["l".as_ref(), "-ba".as_ref(), fx(name).as_os_str()]);
         let s = text(&o.stdout);
-        let mut lines = s.lines();
-        assert_eq!(lines.next(), Some("SIZE\tCRC32\tNAME"));
-        let names: Vec<&str> = lines.map(|l| l.rsplit('\t').next().unwrap().trim_end_matches('/')).collect();
+        let names: Vec<&str> = s.lines().map(|l| l.get(53..).unwrap().trim_end_matches('/')).collect();
         assert_eq!(names.len(), entries, "{name}");
         assert!(names.contains(&"docs/deep/nested/leaf.txt"), "{name}");
         assert!(n_files > 0);
@@ -217,8 +217,12 @@ fn single_stream_files_extract_one_member() {
         let mut want = BTreeMap::new();
         want.insert(member.to_string(), Node::File(data.clone()));
         assert_eq!(snapshot(&t.0), want, "{arc}");
-        let o = run(&["l".as_ref(), fx(arc).as_os_str()]);
-        assert_eq!(text(&o.stdout), format!("SIZE\tCRC32\tNAME\n{listing}"), "{arc}");
+        // 7-Zip table row (`l -ba`): Size in bytes 26..38, Name from byte 53.
+        let o = run(&["l".as_ref(), "-ba".as_ref(), fx(arc).as_os_str()]);
+        let want: Vec<&str> = listing.trim_end().split('\t').collect();
+        let out = text(&o.stdout);
+        let row = out.strip_suffix('\n').unwrap_or(&out);
+        assert_eq!((row.get(26..38).map(str::trim), row.get(53..)), (Some(want[0]), Some(want[2])), "{arc}: {out}");
         let o = run(&["t".as_ref(), fx(arc).as_os_str()]);
         assert_eq!(text(&o.stdout), format!("OK\t1\t{}\n", data.len()), "{arc}");
     }

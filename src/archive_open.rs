@@ -54,8 +54,11 @@ const MAX_LINK_TARGET: u64 = 4096;
 /// Largest LZMA/LZMA2 dictionary accepted (the formats cap it at 4 GiB - 1;
 /// the decoder does not preallocate it, so this only rejects nonsense).
 const MAX_DICTIONARY: u64 = 1 << 32;
-/// Largest PPMd model memory accepted from a 7z coder (7-Zip's own maximum).
-const MAX_PPMD_MEMORY: u64 = 0xFFFF_FFFF - 12 * 3;
+/// Default cap on the PPMd model memory a 7z coder may request. Unlike the
+/// LZMA dictionary, the PPMd model is allocated (and zeroed) up front from the
+/// header's property alone, so this must stay modest. 7-Zip's presets top out
+/// at 192 MiB; larger values are refused as [`SevenZReadError::LimitExceeded`].
+pub const DEFAULT_MAX_PPMD_MEMORY: u64 = 256 << 20;
 /// Name used for a single-stream entry when no better name exists.
 const FALLBACK_NAME: &[u8] = b"data";
 
@@ -456,6 +459,16 @@ fn method_value(id: &[u8]) -> Option<u64> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SevenZCodecs {
     pub max_output: u64,
+    /// Largest PPMd model memory (bytes) accepted from a coder's properties.
+    pub max_ppmd_memory: u64,
+}
+
+impl SevenZCodecs {
+    /// Codecs capped at `max_output` bytes per coder, with the default
+    /// PPMd memory cap ([`DEFAULT_MAX_PPMD_MEMORY`]).
+    pub const fn new(max_output: u64) -> Self {
+        Self { max_output, max_ppmd_memory: DEFAULT_MAX_PPMD_MEMORY }
+    }
 }
 
 impl FolderDecoder for SevenZCodecs {
@@ -499,7 +512,7 @@ impl FolderDecoder for SevenZCodecs {
             sevenz_method::BZIP2 => decode_bzip2(input, size).map_err(|_| E::DecoderFailed)?,
             sevenz_method::PPMD => {
                 let p = crate::ppmd7::parse_properties(props).map_err(|_| E::DecoderFailed)?;
-                crate::ppmd7::decode(p, input, size, MAX_PPMD_MEMORY).map_err(|e| match e {
+                crate::ppmd7::decode(p, input, size, self.max_ppmd_memory).map_err(|e| match e {
                     crate::ppmd7::Ppmd7Error::LimitExceeded => E::LimitExceeded,
                     crate::ppmd7::Ppmd7Error::Allocation => E::Allocation,
                     _ => E::DecoderFailed,
@@ -544,7 +557,7 @@ pub struct SevenZReader<'a> {
 
 impl<'a> SevenZReader<'a> {
     pub fn new(bytes: &'a [u8], limits: ReaderLimits) -> Result<Self, ReaderError> {
-        let codecs = SevenZCodecs { max_output: limits.max_total_size };
+        let codecs = SevenZCodecs::new(limits.max_total_size);
         let sl = SevenZLimits {
             max_files: limits.max_entries,
             max_unpack_bytes: limits.max_total_size,
@@ -775,7 +788,7 @@ mod tests {
         assert_eq!(method_value(&[0x03, 0x01, 0x01]), Some(sevenz_method::LZMA));
         assert_eq!(method_value(&[]), None);
         assert_eq!(method_value(&[0; 9]), None);
-        let c = SevenZCodecs { max_output: 10 };
+        let c = SevenZCodecs::new(10);
         assert_eq!(c.decode(&[0], &[], b"abc", 3), Ok(b"abc".to_vec()));
         assert_eq!(c.decode(&[0], &[], b"abc", 4), Err(SevenZReadError::SizeMismatch));
         assert_eq!(c.decode(&[0], &[], b"abc", 11), Err(SevenZReadError::LimitExceeded));

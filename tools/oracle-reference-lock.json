@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-10-19T15:37:36.616440+00:00",
+  "reference_version": "7-Zip 26.04",
+  "release_tag": "26.04",
+  "source_commit": "9128b80e3a471108678e2b3ec3c985861c8d7b0f",
+  "sources": {
+    "release": {
+      "url": "https://api.github.com/repos/ip7z/7zip/releases/tags/26.04",
+      "fetched": false,
+      "error": "<urlopen error [Errno 8] nodename nor servname provided, or not known>",
+      "web_observed": false,
+      "raw_bytes_retained": false
+    },
+    "cli_help_source": {
+      "url": "https://raw.githubusercontent.com/ip7z/7zip/9128b80e3a471108678e2b3ec3c985861c8d7b0f/CPP/7zip/UI/Console/Main.cpp",
+      "fetched": false,
+      "error": "<urlopen error [Errno 8] nodename nor servname provided, or not known>",
+      "web_observed": true,
+      "raw_bytes_retained": false
+    },
+    "exit_codes_source": {
+      "url": "https://raw.githubusercontent.com/ip7z/7zip/9128b80e3a471108678e2b3ec3c985861c8d7b0f/CPP/7zip/UI/Common/ExitCode.h",
+      "fetched": false,
+      "error": "<urlopen error [Errno 8] nodename nor servname provided, or not known>",
+      "web_observed": true,
+      "raw_bytes_retained": false
+    },
+    "readme": {
+      "url": "https://raw.githubusercontent.com/ip7z/7zip/9128b80e3a471108678e2b3ec3c985861c8d7b0f/DOC/readme.txt",
+      "fetched": false,
+      "error": "<urlopen error [Errno 8] nodename nor servname provided, or not known>",
+      "web_observed": true,
+      "raw_bytes_retained": false
+    }
+  },
+  "selected_official_assets": [
+    {
+      "name": "7z2604-linux-x64.tar.xz",
+      "publisher_sha256": "fc0327ba27e89bd086cf426dff17d77de582953cdbbc10a6576540a06853ffcd",
+      "release_tag": "26.04",
+      "asset_page": "https://github.com/ip7z/7zip/releases/expanded_assets/26.04",
+      "locally_downloaded_sha256": null,
+      "executable_sha256": null,
+      "execution_receipt": null,
+      "download_url": "https://github.com/ip7z/7zip/releases/download/26.04/7z2604-linux-x64.tar.xz",
+      "executable_path": "7zz"
+    },
+    {
+      "name": "7z2604-linux-arm64.tar.xz",
+      "publisher_sha256": "5b0ac3aa91c1e3499f011d6af69d7f6b4de3ef2f011d9e2ff44c58ebd04aa388",
+      "release_tag": "26.04",
+      "asset_page": "https://github.com/ip7z/7zip/releases/expanded_assets/26.04",
+      "locally_downloaded_sha256": null,
+      "executable_sha256": null,
+      "execution_receipt": null,
+      "download_url": "https://github.com/ip7z/7zip/releases/download/26.04/7z2604-linux-arm64.tar.xz",
+      "executable_path": "7zz"
+    },
+    {
+      "name": "7z2604-mac.tar.xz",
+      "publisher_sha256": "bee04358cbcbc7106273cee0e8d72916db2696c48067a3538c34d8cd6fd16578",
+      "release_tag": "26.04",
+      "asset_page": "https://github.com/ip7z/7zip/releases/expanded_assets/26.04",
+      "locally_downloaded_sha256": "bee04358cbcbc7106273cee0e8d72916db2696c48067a3538c34d8cd6fd16578",
+      "executable_sha256": "36ea959367d8f9ac51d47a56dc1f20bfb851f1cd22d6f206e85cb5cbc6ab4577",
+      "execution_receipt": {
+        "observed_at": "2026-10-20T00:05:00Z",
+        "host": "macOS arm64 (Darwin 27.0.0)",
+        "version_line": "7-Zip (z) 26.04 (arm64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-10-05",
+        "binary": "Mach-O universal (x86_64 + arm64)",
+        "cache_dir": "~/.cache/sediment-oracle/26.04/7z2604-mac"
+      },
+      "download_url": "https://github.com/ip7z/7zip/releases/download/26.04/7z2604-mac.tar.xz",
+      "executable_path": "7zz"
+    },
+    {
+      "name": "7z2604-x64.exe",
+      "publisher_sha256": "d54bf805f9f3704d1e8db2fa3498ae7ef2df0312b40b558e7c71c734430a665d",
+      "release_tag": "26.04",
+      "asset_page": "https://github.com/ip7z/7zip/releases/expanded_assets/26.04",
+      "locally_downloaded_sha256": null,
+      "executable_sha256": null,
+      "execution_receipt": null,
+      "download_url": "https://github.com/ip7z/7zip/releases/download/26.04/7z2604-x64.exe"
+    },
+    {
+      "name": "7z2604-arm64.exe",
+      "publisher_sha256": "d4117b95495b0e925334ae7b5bddf2853513274603de15dee6acf03999fbc09c",
+      "release_tag": "26.04",
+      "asset_page": "https://github.com/ip7z/7zip/releases/expanded_assets/26.04",
+      "locally_downloaded_sha256": null,
+      "executable_sha256": null,
+      "execution_receipt": null,
+      "download_url": "https://github.com/ip7z/7zip/releases/download/26.04/7z2604-arm64.exe"
+    }
+  ],
+  "binary_executed": true,
+  "binary_bytes_downloaded": true,
+  "installed_executable_sha256": null,
+  "status": "mac_asset_downloaded_verified_and_executed; linux assets pinned by publisher digest only",
+  "limits": "Publisher asset digests, when present, are observed metadata. Future runner must download exact asset, verify package digest, hash extracted executable, and capture version/options/help. No oracle product tests were run.",
+  "publisher_digest_source": "https://github.com/ip7z/7zip/releases/expanded_assets/26.04",
+  "release_page": "https://github.com/ip7z/7zip/releases/tag/26.04",
+  "required_before_oracle_run": [
+    "Verify downloaded package bytes against the selected publisher SHA256; no latest or PATH lookup substitution.",
+    "Provision in a disposable environment; hash exact executable and dependencies, capture version and supported formats/help output.",
+    "Pin locale/timezone/OS/architecture/argv/environment and finite CPU/RAM/output/time caps.",
+    "Record archive/input/output hashes, per-member payload digests, normalized semantics and raw stdout/stderr/exit status.",
+    "Changing oracle version or corpus byte creates a new reviewed manifest revision; retained old runs remain historical."
+  ],
+  "local_runner": "tools/oracle.sh (downloads into ~/.cache/sediment-oracle, verifies package digest then executable digest when pinned; falls back to ssh sync-sparky-local)"
+}

@@ -1,0 +1,33 @@
+
+7-Zip (z) 26.04 (arm64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-10-05
+ 64-bit arm_v:8-A locale=en_US.utf8 Threads:20 OPEN_MAX:32768, ASM
+
+Scanning the drive for archives:
+1 file, 1562 bytes (2 KiB)
+
+Listing archive: lzma2_solid_hc.7z
+
+--
+Path = lzma2_solid_hc.7z
+Type = 7z
+Physical Size = 1562
+Headers Size = 285
+Method = LZMA2:13
+Solid = +
+Blocks = 1
+
+   Date      Time    Attr         Size   Compressed  Name
+------------------- ----- ------------ ------------  ------------------------
+2024-03-05 06:07:08 D....            0            0  dir
+2024-03-05 06:07:08 D....            0            0  dir/sub
+2024-03-05 06:07:08 D....            0            0  emptydir
+2024-03-05 06:07:08 ....A         1620         1277  a.txt
+2024-03-05 06:07:08 ....A          700               b.bin
+2024-03-05 06:07:08 ....A            7               dir/sub/nested.txt
+2024-03-05 06:07:08 ....A            0               empty.txt
+2024-03-05 06:07:08 ....A           11               hello.txt
+2024-03-05 06:07:08 .R..A           13               héllo_日本.txt
+2024-03-05 06:07:08 ....A         5000               prog.bin
+2024-03-05 06:07:08 ....A            9               link
+------------------- ----- ------------ ------------  ------------------------
+2024-03-05 06:07:08               7360         1277  8 files, 3 folders

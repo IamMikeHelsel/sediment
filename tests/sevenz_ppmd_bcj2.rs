@@ -24,7 +24,7 @@ macro_rules! fx {
 const FIXTURES: [(&[u8], &str); 4] = [fx!("ppmd_solid"), fx!("ppmd_o8_nonsolid"), fx!("bcj2_solid"), fx!("bcj2_lzma_nohc")];
 
 fn codecs() -> SevenZCodecs {
-    SevenZCodecs { max_output: 1 << 30 }
+    SevenZCodecs::new(1 << 30)
 }
 
 /// `Path -> (Size, CRC)` for files in a `7zz l -slt` listing.
@@ -111,6 +111,46 @@ fn bad_ppmd_properties_are_rejected() {
     let c = codecs();
     for props in [&[][..], &[6, 0, 0, 16][..], &[1, 0, 0, 16, 0][..], &[6, 0, 0, 0, 0][..], &[6, 0, 0, 16, 0, 0][..]] {
         assert_eq!(c.decode(&[3, 4, 1], props, &[0; 16], 4), Err(SevenZReadError::DecoderFailed), "{props:?}");
+    }
+}
+
+/// A crafted PPMd memory property must be refused before the model heap is
+/// allocated (the model is zeroed up front), not drive a ~4 GiB allocation.
+#[test]
+fn oversized_ppmd_memory_is_limit_exceeded() {
+    use sediment_engine::archive_open::DEFAULT_MAX_PPMD_MEMORY;
+    use sediment_engine::sevenz_header::FolderDecoder;
+    let c = codecs();
+    let over = (DEFAULT_MAX_PPMD_MEMORY as u32 + 1).to_le_bytes();
+    for mem in [0xFFFF_FF00u32.to_le_bytes(), over] {
+        let props = [8, mem[0], mem[1], mem[2], mem[3]];
+        assert_eq!(c.decode(&[3, 4, 1], &props, &[0; 16], 4), Err(SevenZReadError::LimitExceeded), "{mem:?}");
+    }
+    // A caller may tighten the cap below what the fixture needs.
+    let (bytes, _) = FIXTURES[1];
+    let at = bytes.windows(5).position(|w| w == [3, 4, 1, 5, 8]).expect("PPMd coder") + 5;
+    let need = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    let tight = SevenZCodecs { max_ppmd_memory: u64::from(need) - 1, ..codecs() };
+    let a = SevenZArchive::open(bytes, &tight, SevenZLimits::default()).unwrap();
+    assert_eq!(a.extract_entry(0, &tight), Err(SevenZReadError::LimitExceeded));
+
+    // Patch the fixture's plain header to claim 0xFFFFFF00 bytes of model
+    // memory and fix both header CRCs: extraction must fail cleanly.
+    let mut b = bytes.to_vec();
+    let coders: Vec<usize> = b.windows(5).enumerate().filter(|(_, w)| *w == [3, 4, 1, 5, 8]).map(|(i, _)| i + 5).collect();
+    assert_eq!(coders.len(), 2, "one PPMd coder per folder");
+    for at in coders {
+        b[at..at + 4].copy_from_slice(&0xFFFF_FF00u32.to_le_bytes());
+    }
+    let next_off = 32 + u64::from_le_bytes(b[12..20].try_into().unwrap()) as usize;
+    let next_len = u64::from_le_bytes(b[20..28].try_into().unwrap()) as usize;
+    let hcrc = crc32(&b[next_off..next_off + next_len]);
+    b[28..32].copy_from_slice(&hcrc.to_le_bytes());
+    let scrc = crc32(&b[12..32]);
+    b[8..12].copy_from_slice(&scrc.to_le_bytes());
+    let a = SevenZArchive::open(&b, &codecs(), SevenZLimits::default()).unwrap();
+    for i in 0..a.entries().len() {
+        assert_eq!(a.extract_entry(i, &codecs()), Err(SevenZReadError::LimitExceeded));
     }
 }
 

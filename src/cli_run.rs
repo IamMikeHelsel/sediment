@@ -12,9 +12,10 @@
 //! the FORGE APIs via [`crate::cli_seam`].
 //!
 //! Output conventions (`-bb` levels):
-//! * `l`: default output is the frozen `SIZE\tCRC32\tNAME` table (`-ba`
-//!   drops the header row); `-slt` prints 7-Zip technical blocks (`-ba`
-//!   drops the archive header block).
+//! * `l`: default output is 7-Zip's `Date Time Attr Size Compressed Name`
+//!   table (UTF-8 names, totals row `N files, M folders`; times in UTC);
+//!   `-ba` prints only the rows; `-slt` prints 7-Zip technical blocks
+//!   (`-ba` drops the archive header block).
 //! * `t`: `OK\t<count>\t<bytes>` (dropped by `-ba`); `-bb1` adds `T <name>`.
 //! * `x`/`e`: silent by default; `-bb1` prints `- <name>` per file/link,
 //!   `-bb2` also directories and skipped files, `-bb3` also renamed
@@ -61,7 +62,7 @@ use crate::cli_compat::{
 };
 use crate::cli_seam::listfile::{ListFileError, parse_listfile};
 use crate::cli_seam::slt_format::{SltEntry, format_entry};
-use crate::cli_slt::{archive_header, generic_entry, listed_size, sevenz_details};
+use crate::cli_slt::{archive_header, format_table, format_table_row, generic_entry, sevenz_details, table_rows};
 use crate::cli_seam::wildcard::{match_name, match_path};
 use crate::compress_wrap::{Compression, WrapError, compress, compress_bound_for};
 use crate::extract_fs::{ExtractError, ExtractOptions, OverwritePolicy, SymlinkPolicy, execute_plan};
@@ -651,17 +652,21 @@ fn list(cl: &CommandLine, ui: &mut Ui<'_, '_>, reader: &dyn ArchiveReader, chose
         }
         return;
     }
-    if !cl.no_headers {
-        ui.out("SIZE\tCRC32\tNAME\n");
+    let rows = table_rows(reader, chosen, buf, ReaderLimits::default());
+    if cl.no_headers {
+        for r in &rows {
+            ui.out(&format_table_row(r));
+        }
+        return;
     }
-    for &i in chosen {
-        let e = &reader.entries()[i];
-        let crc = match reader.crc32(i) {
-            Some(c) => format!("{c:08x}"),
-            None => String::from("--------"),
-        };
-        ui.out(&format!("{}\t{crc}\t{}\n", listed_size(e), shown(&e.path)));
-    }
+    let extra = match reader.format() {
+        ArchiveFormat::SevenZ => sevenz_details(buf, ReaderLimits::default()).map(|(h, _)| h).unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    let name = cl.archive.as_deref().map_or_else(|| String::from("stdin"), os_display);
+    let head = archive_header(&name, format_name(reader.format()), buf.len() as u64, &extra);
+    ui.out(head.strip_suffix("----------\n").unwrap_or(&head));
+    ui.out(&format_table(&rows));
 }
 
 fn test(cl: &CommandLine, ui: &mut Ui<'_, '_>, opened: &OpenedArchive<'_>, chosen: &[usize]) -> i32 {

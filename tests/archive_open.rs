@@ -184,7 +184,7 @@ fn stream_helpers() {
 
 #[test]
 fn sevenz_codecs_respect_limits() {
-    let c = SevenZCodecs { max_output: 100 };
+    let c = SevenZCodecs::new(100);
     assert_eq!(c.decode(&[0x21], &[0x10], &[0], 101), Err(SevenZReadError::LimitExceeded));
     // LZMA2 end marker only: zero output, but 5 bytes were promised.
     assert_eq!(c.decode(&[0x21], &[0x10], &[0], 5), Err(SevenZReadError::SizeMismatch));

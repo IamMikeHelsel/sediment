@@ -68,7 +68,7 @@ fn codecs(limits: &UpdateLimits) -> (SevenZCodecs, SevenZLimits) {
         max_unpack_bytes: limits.max_total_bytes,
         ..SevenZLimits::default()
     };
-    (SevenZCodecs { max_output: limits.max_total_bytes }, sl)
+    (SevenZCodecs::new(limits.max_total_bytes), sl)
 }
 
 fn open<'a>(bytes: &'a [u8], limits: &UpdateLimits) -> Result<SevenZArchive<'a>, UpdateError> {
