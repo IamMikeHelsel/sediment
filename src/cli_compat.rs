@@ -37,6 +37,17 @@
 //! | `-m{...}` | method switches, passed to the 7z writer (`a` to `.7z`) |
 //! | `-p{password}` | password (`l`/`t`/`x`/`e`/`a`; see `cli_crypt`) |
 //! | `-mem={ZipCrypto\|AES128\|AES192\|AES256}`, `-mhe[=on\|off]` | encryption for `a` (see `cli_crypt`) |
+//! | `-ai[r[-\|0]]{!wildcard\|@listfile}` | include archives (`l`/`t`/`x`/`e`, repeatable) |
+//! | `-ax[r[-\|0]]{!wildcard\|@listfile}` | exclude archives (`l`/`t`/`x`/`e`, repeatable) |
+//! | `-w[{dir}]` | working directory for the temporary archive (`a`/`u`/`d`; empty = system temp) |
+//! | `-stl` | set the archive's modification time to that of its newest entry (`a`/`u`/`d`) |
+//! | `-ad`, `-bd` | accepted (GUI dialog / progress indicator; no effect) |
+//! | `-bt` | print execution time statistics |
+//! | `-stx{type}` | exclude an archive type when opening (repeatable) |
+//! | `-sse` | stop creating the archive when an input cannot be opened (`a`) |
+//! | `-ssw` | add files open for writing (accepted; Unix never locks them) |
+//! | `-spe` | drop the root folder duplicated by the `-o` folder name (`x`) |
+//! | `-spo{d\|c\|r}` | path-overwrite policy when no `-ao`/`-y`: d = fail (default), c = continue (skip), r = replace |
 //! | `--` | end of switches |
 //!
 //! Names starting with `@` are list files. Exit codes are the 7-Zip ones
@@ -203,6 +214,17 @@ pub enum NameItem {
     ListFile(PathBuf),
 }
 
+/// `-spo` path-overwrite policy (used when neither `-ao` nor `-y` is given).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathPolicy {
+    /// `-spod`: an existing target is an error (the default).
+    Fail,
+    /// `-spoc`: skip existing targets and continue (warning).
+    Continue,
+    /// `-spor`: replace existing targets.
+    Replace,
+}
+
 /// An `-i` / `-x` item with its own recursion override.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameRule {
@@ -261,6 +283,24 @@ pub struct CommandLine {
     /// `-p{password}` (taken off the command line by `cli_crypt` before
     /// parsing; see `cli_run::run_args`).
     pub password: Option<String>,
+    /// `-ai`: archive-name includes (`l`/`t`/`x`/`e`).
+    pub archive_includes: Vec<NameRule>,
+    /// `-ax`: archive-name excludes (`l`/`t`/`x`/`e`).
+    pub archive_excludes: Vec<NameRule>,
+    /// `-w[{dir}]`: directory for the temporary archive.
+    pub work_dir: Option<PathBuf>,
+    /// `-stl`
+    pub archive_time_from_newest: bool,
+    /// `-bt`
+    pub timing: bool,
+    /// `-stx{type}`: excluded archive types (lower case).
+    pub exclude_types: Vec<String>,
+    /// `-sse`
+    pub stop_on_open_error: bool,
+    /// `-spe`
+    pub eliminate_root_dup: bool,
+    /// `-spo{d|c|r}`
+    pub path_policy: Option<PathPolicy>,
 }
 
 impl CommandLine {
@@ -295,6 +335,15 @@ impl CommandLine {
             volumes: Vec::new(),
             methods: Vec::new(),
             password: None,
+            archive_includes: Vec::new(),
+            archive_excludes: Vec::new(),
+            work_dir: None,
+            archive_time_from_newest: false,
+            timing: false,
+            exclude_types: Vec::new(),
+            stop_on_open_error: false,
+            eliminate_root_dup: false,
+            path_policy: None,
         }
     }
 
@@ -342,17 +391,40 @@ enum Sw {
     NoArchiveName,
     Volume,
     Method,
+    ArchiveInclude,
+    ArchiveExclude,
+    WorkDir,
+    ArchiveTime,
+    Accepted,
+    Timing,
+    ExcludeType,
+    StopOnOpenError,
+    SharedWrite,
+    EliminateRoot,
+    PathOverwrite,
 }
 
+/// Archive type names accepted by `-stx` (lower case): the `-t` names plus
+/// the read-only formats of `archive_open`.
+pub const EXCLUDABLE_TYPES: [&str; 20] = [
+    "zip", "7z", "tar", "gzip", "gz", "bzip2", "bz2", "xz", "lzh", "lha", "arj", "z", "cpio", "ar", "deb", "rpm",
+    "xar", "zstd", "zst", "wim",
+];
+
 /// Switch table: name (lower case) and id. The longest matching name wins.
-const SWITCHES: [(&str, Sw); 25] = [
+const SWITCHES: [(&str, Sw); 37] = [
+    ("ad", Sw::Accepted),
+    ("ai", Sw::ArchiveInclude),
     ("an", Sw::NoArchiveName),
     ("ao", Sw::Overwrite),
+    ("ax", Sw::ArchiveExclude),
     ("ba", Sw::NoHeaders),
     ("bb", Sw::LogLevel),
+    ("bd", Sw::Accepted),
     ("bse", Sw::StderrTo),
     ("bso", Sw::StdoutTo),
     ("bsp", Sw::ProgressTo),
+    ("bt", Sw::Timing),
     ("i", Sw::Include),
     ("x", Sw::Exclude),
     ("l", Sw::Follow),
@@ -366,10 +438,17 @@ const SWITCHES: [(&str, Sw); 25] = [
     ("slt", Sw::Technical),
     ("snl", Sw::Symlinks),
     ("so", Sw::StdOut),
+    ("spe", Sw::EliminateRoot),
     ("spf", Sw::FullPaths),
+    ("spo", Sw::PathOverwrite),
     ("ssc", Sw::CaseSensitive),
+    ("sse", Sw::StopOnOpenError),
+    ("ssw", Sw::SharedWrite),
+    ("stl", Sw::ArchiveTime),
+    ("stx", Sw::ExcludeType),
     ("t", Sw::Type),
     ("v", Sw::Volume),
+    ("w", Sw::WorkDir),
     ("y", Sw::Yes),
 ];
 
@@ -565,6 +644,47 @@ fn apply_switch(cl: &mut CommandLine, arg: &OsStr) -> Result<(), CmdLineError> {
             }
             cl.methods.push(arg.to_os_string());
         }
+        Sw::ArchiveInclude => cl.archive_includes.push(name_rule(arg, value_start, &shown)?),
+        Sw::ArchiveExclude => cl.archive_excludes.push(name_rule(arg, value_start, &shown)?),
+        Sw::WorkDir => {
+            let dir = os_tail(arg, value_start).unwrap_or_default();
+            cl.work_dir = Some(if dir.is_empty() { std::env::temp_dir() } else { PathBuf::from(dir) });
+        }
+        Sw::ArchiveTime => {
+            no_param(param, &shown)?;
+            cl.archive_time_from_newest = true;
+        }
+        Sw::Accepted | Sw::SharedWrite => no_param(param, &shown)?,
+        Sw::Timing => {
+            no_param(param, &shown)?;
+            cl.timing = true;
+        }
+        Sw::ExcludeType => {
+            let v = String::from_utf8_lossy(param).to_ascii_lowercase();
+            if v.is_empty() {
+                return Err(bad("missing archive type"));
+            }
+            if !EXCLUDABLE_TYPES.contains(&v.as_str()) {
+                return Err(bad(format!("unsupported archive type: {v}")));
+            }
+            cl.exclude_types.push(v);
+        }
+        Sw::StopOnOpenError => {
+            no_param(param, &shown)?;
+            cl.stop_on_open_error = true;
+        }
+        Sw::EliminateRoot => {
+            no_param(param, &shown)?;
+            cl.eliminate_root_dup = true;
+        }
+        Sw::PathOverwrite => {
+            cl.path_policy = Some(match param {
+                b"d" | b"D" => PathPolicy::Fail,
+                b"c" | b"C" => PathPolicy::Continue,
+                b"r" | b"R" => PathPolicy::Replace,
+                _ => return Err(bad(format!("invalid path overwrite policy: {shown}"))),
+            })
+        }
     }
     Ok(())
 }
@@ -586,6 +706,10 @@ pub fn parse_command_line(command: Command, args: &[OsString]) -> Result<Command
         }
         positional.push(a);
     }
+    let multi = !cl.archive_includes.is_empty() || !cl.archive_excludes.is_empty();
+    if multi && command == Command::Add {
+        return Err(bad("-ai/-ax apply to l, t, x and e only"));
+    }
     // With -si (reading) or -an there is no archive name: every positional is a name.
     let nameless = cl.no_archive_name || (cl.stdin.is_some() && command != Command::Add);
     let mut rest = positional.into_iter();
@@ -605,7 +729,10 @@ pub fn parse_command_line(command: Command, args: &[OsString]) -> Result<Command
     if cl.to_stdout && !cl.volumes.is_empty() {
         return Err(bad("-so cannot be combined with -v"));
     }
-    if cl.no_archive_name && !cl.to_stdout {
+    if multi && cl.stdin.is_some() {
+        return Err(bad("-ai/-ax cannot be combined with -si"));
+    }
+    if cl.no_archive_name && cl.archive_includes.is_empty() && !cl.to_stdout {
         return Err(bad("-an requires -so"));
     }
     Ok(cl)
