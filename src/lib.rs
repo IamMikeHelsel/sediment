@@ -1,6 +1,7 @@
 //! Sediment archive engine. Capability tickets; no parity claim.
 pub mod adler32;
 pub mod aes;
+pub mod android_sparse;
 pub mod ar_archive;
 pub mod ar_read;
 pub mod archive_detect;
@@ -168,3 +169,7 @@ pub mod lzip_container;
 pub mod cp437_codec;
 pub mod reader_qcow2;
 pub mod sevenz_sfx_scan;
+pub mod qcow2_compressed;
+pub mod gzip_slt_info;
+pub mod partition_type_names;
+pub mod uefi_section_decode;
