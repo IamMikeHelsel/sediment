@@ -149,3 +149,4 @@ pub mod base64_codec;
 pub mod slt_format;
 pub mod cramfs_dir;
 pub mod reader_base64;
+pub mod qcow2_header;
