@@ -36,6 +36,7 @@ use crate::sevenz_header::{
     Folder, Header, SIGNATURE, SevenZLimits, SevenZReadError, method_id, pack_stream_ranges,
     property_id as pid,
 };
+use crate::sevenz_aes_coder::SEVENZ_AES_METHOD_ID;
 use crate::sevenz_read::{SevenZArchive, filetime_to_unix};
 use crate::sevenz_write::{
     SevenZItem, SevenZWriteError, SevenZWriteLimits, SevenZWriteOptions, unix_attributes, unix_to_filetime, write_7z,
@@ -455,6 +456,26 @@ pub fn apply_7z(
     for (e, a) in entries.iter().zip(&plan.actions) {
         if let (Some(f), EntryAction::Delete | EntryAction::Replace(_)) = (e.folder_index, a) {
             *dirty.get_mut(f).ok_or(UpdateError::InvalidArchive)? = true;
+        }
+    }
+
+    // Sediment cannot re-encrypt, so any plan that would write new data
+    // into an archive holding AES-encrypted folders (re-encoding survivors of
+    // an encrypted folder, replacing or adding members) is refused rather
+    // than silently storing plaintext next to ciphertext. Header-only
+    // edits (renames, deletes of whole folders or empty items) are fine.
+    let encrypted = |f: &Folder| f.coders.iter().any(|c| c.method_id == SEVENZ_AES_METHOD_ID);
+    if header.main_streams.folders.iter().any(encrypted) {
+        let writes_new = !plan.additions.is_empty()
+            || plan.actions.iter().any(|a| matches!(a, EntryAction::Replace(_)))
+            || entries.iter().zip(&plan.actions).any(|(e, a)| {
+                !matches!(a, EntryAction::Delete | EntryAction::Replace(_))
+                    && e.folder_index.is_some_and(|f| {
+                        dirty.get(f) == Some(&true) && header.main_streams.folders.get(f).is_some_and(encrypted)
+                    })
+            });
+        if writes_new {
+            return Err(UpdateError::Unsupported);
         }
     }
 
