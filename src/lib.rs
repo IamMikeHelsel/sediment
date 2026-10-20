@@ -82,6 +82,7 @@ pub mod lzma_properties;
 pub mod lzma2_decode;
 pub mod lzma2_encode;
 pub mod lzw_z;
+pub mod lzma_alone;
 pub mod lzx;
 pub mod mbr_gpt;
 pub mod mszip;

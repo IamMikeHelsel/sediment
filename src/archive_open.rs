@@ -697,7 +697,12 @@ pub fn open_named<'a>(
         // An empty tar archive is only its end-of-archive marker: two or
         // more zero blocks (POSIX ustar; `tar cf x.tar -T /dev/null`).
         Detected::Unknown if is_empty_tar(bytes) => Ok(Box::new(TarReader::new(Cow::Borrowed(bytes), limits)?)),
-        Detected::LzmaAlone | Detected::Unknown => crate::legacy_open::open_legacy(bytes, archive_name, limits),
+        d @ (Detected::LzmaAlone | Detected::Unknown) => {
+            match crate::lzma_alone::try_open(bytes, archive_name, d == Detected::LzmaAlone, limits) {
+                Some(r) => r,
+                None => crate::legacy_open::open_legacy(bytes, archive_name, limits),
+            }
+        }
     }
 }
 

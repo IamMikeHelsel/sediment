@@ -599,6 +599,8 @@ fn format_name(f: ArchiveFormat) -> &'static str {
         ArchiveFormat::Xar => "xar",
         ArchiveFormat::Zstd => "zstd",
         ArchiveFormat::Wim => "wim",
+        ArchiveFormat::Lzma => "lzma",
+        ArchiveFormat::Lzma86 => "lzma86",
     }
 }
 

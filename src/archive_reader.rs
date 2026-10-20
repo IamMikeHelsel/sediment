@@ -73,6 +73,10 @@ pub enum ArchiveFormat {
     Zstd,
     /// Windows Imaging (`.wim`); see `archive_open_ext`.
     Wim,
+    /// LZMA-alone single stream (`.lzma`); see `lzma_alone`.
+    Lzma,
+    /// LZMA SDK `.lzma86` single stream (x86 BCJ flag + LZMA); see `lzma_alone`.
+    Lzma86,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
