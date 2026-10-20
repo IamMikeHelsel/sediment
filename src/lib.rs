@@ -155,3 +155,4 @@ pub mod vdi_header;
 pub mod macho_commands;
 pub mod apm_partition;
 pub mod vmdk_sparse;
+pub mod ext4_extents;
